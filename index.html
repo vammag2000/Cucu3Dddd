@@ -7,16 +7,25 @@
 <style>
   body { margin:0; overflow:hidden; background:#141414; font-family:sans-serif; touch-action:none; }
   #canvas-container { width:100vw; height:100vh; display:block; }
-  #loading { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
-             color:#fff; font-size:18px; text-align:center; padding:0 20px; }
+  #loading { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); color:#fff; font-size:18px; text-align:center; }
   #crush-btn {
     position:absolute; bottom:30px; left:50%; transform:translateX(-50%);
     padding:15px 40px; font-size:20px; font-weight:bold; color:#fff;
-    background:#ff4757; border:none; border-radius:30px;
-    box-shadow:0 4px 15px rgba(255,71,87,.4); cursor:pointer; z-index:10;
+    background:#ff4757; border:none; border-radius:30px; z-index:10;
+    box-shadow:0 4px 15px rgba(255,71,87,.4); cursor:pointer;
   }
   #crush-btn:active { transform:translateX(-50%) scale(0.95); background:#ff6b81; }
   #crush-btn:disabled { background:#444; box-shadow:none; }
+  
+  /* Панель для выравнивания модели */
+  #controls {
+    position:absolute; top:20px; left:20px; z-index:100; display:flex; flex-direction:column; gap:8px;
+  }
+  #controls button {
+    padding:10px 15px; font-size:14px; font-weight:bold; color:#fff;
+    background:#333; border:1px solid #555; border-radius:10px;
+  }
+  #controls button:active { background:#555; }
 </style>
 <script type="importmap">
 {
@@ -30,6 +39,14 @@
 <body>
 <div id="loading">Загрузка модели...</div>
 <div id="canvas-container"></div>
+
+<!-- Кнопки для ручного выравнивания -->
+<div id="controls">
+  <button id="btn-rotx">Повернуть X</button>
+  <button id="btn-roty">Повернуть Y</button>
+  <button id="btn-rotz">Повернуть Z</button>
+</div>
+
 <button id="crush-btn" disabled>Давить</button>
 
 <script type="module">
@@ -59,15 +76,12 @@ scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 const camera = new THREE.PerspectiveCamera(50, window.innerWidth/window.innerHeight, 0.1, 2000);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
-controls.dampingFactor = 0.08;
 
 // ---------- Свет ----------
 scene.add(new THREE.HemisphereLight(0xffffff, 0x333333, 1.0));
-
 const dirLight = new THREE.DirectionalLight(0xffffff, 2.5);
 dirLight.castShadow = true;
 dirLight.shadow.mapSize.set(2048, 2048);
-dirLight.shadow.bias = -0.0005;
 scene.add(dirLight);
 
 // ---------- Состояние ----------
@@ -75,69 +89,52 @@ let wallLeft=null, wallRight=null;
 let isCrushing = false, hasCollided = false;
 let audioCtx = null;
 let shakeAmt = 0;
-
 let progress = 0; 
-const SPEED = 6.0; // ОЧЕНЬ БЫСТРО
+const SPEED = 5.0; 
 
-let startX1 = 0, startX2 = 0;
-let targetX1 = 0, targetX2 = 0;
+let startX1 = 0, startX2 = 0, targetX1 = 0, targetX2 = 0;
 let boxSize = new THREE.Vector3();
+let srcModel = null; // Ссылка на оригинальную модель
+
+// Начальные углы (по умолчанию 0)
+let rotX = 0, rotY = 0, rotZ = 0;
 
 // ---------- Загрузка ----------
 new GLTFLoader().load('./model.glb', (gltf) => {
-  const src = gltf.scene;
-
-  // ЖЕСТКО ОБНУЛЯЕМ ВСЕ ПОВОРОТЫ МОДЕЛИ (лечим наклон из 3D-редактора)
-  src.rotation.set(0, 0, 0);
-  src.position.set(0, 0, 0);
-
-  // Вычисляем размеры
-  const box = new THREE.Box3().setFromObject(src);
-  box.getSize(boxSize);
+  srcModel = gltf.scene;
   
-  // Центрируем модель внутри её собственной группы
-  const center = new THREE.Vector3(); 
-  box.getCenter(center);
-  src.position.sub(center);
+  // Сначала просто центрируем
+  const box = new THREE.Box3().setFromObject(srcModel);
+  box.getSize(boxSize);
+  const center = new THREE.Vector3(); box.getCenter(center);
+  srcModel.position.sub(center);
 
-  src.traverse(o => {
+  srcModel.traverse(o => {
     if (o.isMesh) {
       o.castShadow = true;
       o.receiveShadow = true;
+      if (o.material) o.material.side = THREE.DoubleSide; // Чтобы не было дырок
     }
   });
 
-  // 2. ЛЕВАЯ СТЕНА
+  // Левая стена
   wallLeft = new THREE.Group();
-  wallLeft.add(src);
+  wallLeft.add(srcModel);
   scene.add(wallLeft);
 
-  // 3. ПРАВАЯ СТЕНА
-  const clone = src.clone(true);
+  // Правая стена
+  const clone = srcModel.clone(true);
   clone.traverse(o => { if (o.isMesh && o.material) o.material = o.material.clone(); });
-  
   wallRight = new THREE.Group();
   wallRight.add(clone);
-  wallRight.rotation.y = Math.PI; // Разворот ровно на 180 градусов (шипы влево)
+  // Делаем зеркальное отражение, чтобы шипы смотрели друг на друга, но модель не кувыркалась
+  wallRight.scale.x = -1; 
   scene.add(wallRight);
 
-  // 4. Вычисляем дистанцию
-  const halfWidth = boxSize.x / 2;
-  
-  // Они встретятся ровно тогда, когда их центры будут на расстоянии ширины друг от друга
-  targetX1 = -halfWidth;
-  targetX2 =  halfWidth;
-  
-  // Стартовые позиции (отъезжают на 3 единицы назад)
-  startX1 = -halfWidth - 3;
-  startX2 =  halfWidth + 3;
+  updatePositions(); // Считаем дистанцию и ставим стены
 
-  // Фиксируем по Y и Z (Y=0 - значит по центру экрана, Z=0 - строго в одной плоскости)
-  wallLeft.position.set(startX1, 0, 0);
-  wallRight.position.set(startX2, 0, 0);
-
-  // 5. Настройка камеры (смотрит прямо на пресс)
-  const camDist = Math.max(boxSize.y * 1.8, boxSize.x * 5, 8);
+  // Настройка камеры
+  const camDist = Math.max(boxSize.y * 2, boxSize.x * 4, boxSize.z * 4, 8);
   camera.position.set(0, 0, camDist);
   controls.target.set(0, 0, 0);
 
@@ -159,53 +156,69 @@ new GLTFLoader().load('./model.glb', (gltf) => {
   });
 },
 (xhr) => {
-  if (xhr.total) {
-    document.getElementById('loading').innerText = `Загрузка: ${Math.round(xhr.loaded/xhr.total*100)}%`;
-  }
+  if (xhr.total) document.getElementById('loading').innerText = `Загрузка: ${Math.round(xhr.loaded/xhr.total*100)}%`;
 },
 (err) => {
   console.error(err);
   document.getElementById('loading').innerText = 'Ошибка загрузки model.glb.';
 });
 
+// ---------- Функция пересчета после поворота ----------
+function updatePositions() {
+  if (!srcModel || !wallLeft || !wallRight) return;
+
+  // Применяем углы, которые накрутил пользователь
+  srcModel.rotation.set(rotX, rotY, rotZ);
+
+  // Обновляем размеры после поворота
+  const box = new THREE.Box3().setFromObject(srcModel);
+  box.getSize(boxSize);
+
+  // Вычисляем, на сколько сдвинуть стены, чтобы они соприкоснулись
+  const halfWidth = boxSize.x / 2;
+  targetX1 = -halfWidth;
+  targetX2 =  halfWidth;
+
+  const startOffset = halfWidth + 3;
+  startX1 = -startOffset;
+  startX2 =  startOffset;
+
+  // Ставим стены на место (по Y и Z строго 0)
+  wallLeft.position.set(startX1, 0, 0);
+  wallRight.position.set(startX2, 0, 0);
+  
+  progress = isCrushing ? 1 : 0;
+}
+
+// ---------- Кнопки поворота ----------
+document.getElementById('btn-rotx').onclick = () => { rotX += Math.PI / 4; updatePositions(); };
+document.getElementById('btn-roty').onclick = () => { rotY += Math.PI / 4; updatePositions(); };
+document.getElementById('btn-rotz').onclick = () => { rotZ += Math.PI / 4; updatePositions(); };
+
 // ---------- Эффекты ----------
 function onImpact() {
-  shakeAmt = 0.4; 
-  spawnSparks();  
-  playImpactSound(); 
+  shakeAmt = 0.3; spawnSparks(); playImpactSound(); 
 }
 
 function spawnSparks() {
-  const N = 100;
+  const N = 80;
   const geo = new THREE.BufferGeometry();
   const pos = new Float32Array(N*3);
   const vel = [];
-  
   for (let i=0; i<N; i++) {
-    pos[i*3]   = 0; 
-    pos[i*3+1] = (Math.random()-0.5) * boxSize.y * 0.8; 
-    pos[i*3+2] = (Math.random()-0.5) * boxSize.z;
-    
-    vel.push(new THREE.Vector3(
-      (Math.random()-0.5) * 20,
-      (Math.random()-0.5) * 10,
-      (Math.random()-0.5) * 10
-    ));
+    pos[i*3] = 0; pos[i*3+1] = (Math.random()-0.5)*boxSize.y; pos[i*3+2] = (Math.random()-0.5)*boxSize.z;
+    vel.push(new THREE.Vector3((Math.random()-0.5)*15, (Math.random()-0.5)*10, (Math.random()-0.5)*10));
   }
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  const mat = new THREE.PointsMaterial({ color:0xffaa00, size:0.08, transparent:true, opacity:1, depthWrite:false });
+  const mat = new THREE.PointsMaterial({ color:0xffaa00, size:0.08, transparent:true, opacity:1 });
   const pts = new THREE.Points(geo, mat);
   scene.add(pts);
-
   let life = 0;
   const tick = () => {
     life += 0.016;
     const a = geo.attributes.position.array;
     for (let i=0; i<N; i++) {
-      vel[i].y -= 25*0.016; 
-      a[i*3]   += vel[i].x*0.016;
-      a[i*3+1] += vel[i].y*0.016;
-      a[i*3+2] += vel[i].z*0.016;
+      vel[i].y -= 20*0.016; a[i*3] += vel[i].x*0.016; a[i*3+1] += vel[i].y*0.016; a[i*3+2] += vel[i].z*0.016;
     }
     geo.attributes.position.needsUpdate = true;
     mat.opacity = Math.max(0, 1 - life*1.5);
@@ -218,23 +231,14 @@ function spawnSparks() {
 function playImpactSound() {
   if (!audioCtx) return;
   const ctx = audioCtx, now = ctx.currentTime;
-
   const o1 = ctx.createOscillator(), g1 = ctx.createGain();
-  o1.frequency.setValueAtTime(150, now);
-  o1.frequency.exponentialRampToValueAtTime(30, now+0.3);
-  g1.gain.setValueAtTime(1.0, now);
-  g1.gain.exponentialRampToValueAtTime(0.001, now+0.5);
-  o1.connect(g1).connect(ctx.destination);
-  o1.start(now); o1.stop(now+0.6);
-
+  o1.frequency.setValueAtTime(120, now); o1.frequency.exponentialRampToValueAtTime(20, now+0.3);
+  g1.gain.setValueAtTime(1.0, now); g1.gain.exponentialRampToValueAtTime(0.001, now+0.5);
+  o1.connect(g1).connect(ctx.destination); o1.start(now); o1.stop(now+0.6);
   const o2 = ctx.createOscillator(), g2 = ctx.createGain();
-  o2.type = 'sawtooth';
-  o2.frequency.setValueAtTime(800, now);
-  o2.frequency.exponentialRampToValueAtTime(200, now+0.15);
-  g2.gain.setValueAtTime(0.2, now);
-  g2.gain.exponentialRampToValueAtTime(0.001, now+0.3);
-  o2.connect(g2).connect(ctx.destination);
-  o2.start(now); o2.stop(now+0.4);
+  o2.type = 'sawtooth'; o2.frequency.setValueAtTime(800, now); o2.frequency.exponentialRampToValueAtTime(150, now+0.15);
+  g2.gain.setValueAtTime(0.2, now); g2.gain.exponentialRampToValueAtTime(0.001, now+0.3);
+  o2.connect(g2).connect(ctx.destination); o2.start(now); o2.stop(now+0.4);
 }
 
 // ---------- Анимация ----------
@@ -248,7 +252,6 @@ function animate() {
     if (isCrushing) progress = Math.min(progress + dt * SPEED, 1);
     else progress = Math.max(progress - dt * SPEED, 0);
 
-    // Двигаем ТОЛЬКО по X. Y и Z остаются нулевыми.
     wallLeft.position.x = THREE.MathUtils.lerp(startX1, targetX1, progress);
     wallRight.position.x = THREE.MathUtils.lerp(startX2, targetX2, progress);
 
