@@ -27,7 +27,6 @@
             font-size: 18px;
             pointer-events: none;
         }
-        /* Стиль для кнопки «Давить» внизу экрана */
         #crush-btn {
             position: absolute;
             bottom: 30px;
@@ -51,7 +50,6 @@
             background-color: #ff6b81;
         }
     </style>
-    <!-- Подключаем Three.js через CDN -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
@@ -60,8 +58,6 @@
 
     <div id="loading">Загрузка модели...</div>
     <div id="canvas-container"></div>
-    
-    <!-- Кнопка управления -->
     <button id="crush-btn">Давить</button>
 
     <script>
@@ -76,7 +72,6 @@
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         document.getElementById('canvas-container').appendChild(renderer.domElement);
 
-        // Освещение
         const ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
         scene.add(ambientLight);
 
@@ -84,39 +79,36 @@
         dirLight.position.set(5, 10, 7.5);
         scene.add(dirLight);
 
-        // Управление камерой пальцем
         const controls = new THREE.OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
 
         let wall1 = null;
         let wall2 = null;
 
-        // Переменные для анимации движения стен
         let isCrushing = false;
-        let progress = 0; // от 0 (раздвинуты) до 1 (сдвинуты)
+        let progress = 0;
         
-        // Начальные и конечные позиции по оси X
-        let startX1 = -2.0; // Левая стена
-        let startX2 = 2.0;  // Правая стена
-        let targetX1 = -0.6; // Точка сближения левой стены
-        let targetX2 = 0.6;  // Точка сближения правой стены
+        // Позиции: стены стартуют пошире, а при нажатии сближаются на нужное расстояние
+        let startX1 = -2.2; 
+        let startX2 = 2.2;  
+        let targetX1 = -0.7; 
+        let targetX2 = 0.7;  
 
-        // Загрузка модели
         const loader = new THREE.GLTFLoader();
         loader.load(
             'model.glb',
             (gltf) => {
                 wall1 = gltf.scene;
                 
-                // Первая стена (левая)
+                // Левая стена (разворачиваем шипами вправо, в центр)
                 wall1.position.set(startX1, 0, 0);
+                wall1.rotation.y = Math.PI / 2; // Поворот лицом к центру
                 scene.add(wall1);
 
-                // Вторая стена (клонируем первую, разворачиваем шипами навстречу)
+                // Правая стена (клонируем и разворачиваем шипами влево, навстречу первой)
                 wall2 = wall1.clone();
                 wall2.position.set(startX2, 0, 0);
-                // Разворачиваем вторую стену на 180 градусов по оси Y, чтобы шипы смотрели друг на друга
-                wall2.rotation.y = Math.PI; 
+                wall2.rotation.y = -Math.PI / 2; // Поворот лицом к центру с другой стороны
                 scene.add(wall2);
 
                 document.getElementById('loading').style.display = 'none';
@@ -133,28 +125,22 @@
             }
         );
 
-        // Логика кнопки «Давить»
         const btn = document.getElementById('crush-btn');
         btn.addEventListener('click', () => {
             isCrushing = !isCrushing;
             btn.innerText = isCrushing ? 'Раздвинуть' : 'Давить';
         });
 
-        // Главный цикл анимации
         function animate() {
             requestAnimationFrame(animate);
 
-            // Плавное движение стен
             if (wall1 && wall2) {
                 if (isCrushing) {
-                    // Едут навстречу друг другу
                     if (progress < 1) progress += 0.02;
                 } else {
-                    // Возвращаются назад
                     if (progress > 0) progress -= 0.02;
                 }
 
-                // Интерполяция позиций (плавный ход)
                 wall1.position.x = THREE.MathUtils.lerp(startX1, targetX1, progress);
                 wall2.position.x = THREE.MathUtils.lerp(startX2, targetX2, progress);
             }
@@ -165,7 +151,6 @@
 
         animate();
 
-        // Адаптация под поворот экрана
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
