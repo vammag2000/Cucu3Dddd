@@ -71,27 +71,27 @@ dirLight.shadow.bias = -0.0005;
 scene.add(dirLight);
 
 // ---------- Состояние ----------
-let topWall=null, bottomWall=null;
+let wallLeft=null, wallRight=null;
 let isCrushing = false, hasCollided = false;
 let audioCtx = null;
 let shakeAmt = 0;
 
 let progress = 0; 
-const SPEED = 4.0; // ОЧЕНЬ БЫСТРО (1.0 = 1 секунда, 4.0 = 0.25 секунды)
+const SPEED = 5.0; // ОЧЕНЬ БЫСТРО (смыкаются за 0.2 секунды)
 
-let startY = 0;
-let contactY = 0;
+let startX1 = 0, startX2 = 0;
+let contactX1 = 0, contactX2 = 0;
 let boxSize = new THREE.Vector3();
 
 // ---------- Загрузка ----------
 new GLTFLoader().load('./model.glb', (gltf) => {
   const src = gltf.scene;
 
-  // 1. Центрируем модель идеально в нуле координат
+  // 1. Центрируем модель идеально в нуле координат (0,0,0)
   const box = new THREE.Box3().setFromObject(src);
   box.getSize(boxSize);
   const center = new THREE.Vector3(); box.getCenter(center);
-  src.position.sub(center); // Теперь центр модели ровно на (0,0,0)
+  src.position.sub(center); 
 
   src.traverse(o => {
     if (o.isMesh) {
@@ -100,46 +100,48 @@ new GLTFLoader().load('./model.glb', (gltf) => {
     }
   });
 
-  // 2. ВЕРХНЯЯ СТЕНА (Шипы вниз)
-  topWall = new THREE.Group();
-  topWall.add(src);
-  // Поворачиваем на -90 градусов вокруг Z, чтобы шипы (которые смотрят вправо) смотрели ВНИЗ
-  topWall.rotation.z = -Math.PI / 2; 
-  scene.add(topWall);
+  // 2. ЛЕВАЯ СТЕНА
+  wallLeft = new THREE.Group();
+  wallLeft.add(src);
+  scene.add(wallLeft);
 
-  // 3. НИЖНЯЯ СТЕНА (Шипы вверх)
+  // 3. ПРАВАЯ СТЕНА
   const clone = src.clone(true);
   clone.traverse(o => { if (o.isMesh && o.material) o.material = o.material.clone(); });
-  bottomWall = new THREE.Group();
-  bottomWall.add(clone);
-  // Поворачиваем на +90 градусов вокруг Z, чтобы шипы смотрели ВВЕРХ
-  bottomWall.rotation.z = Math.PI / 2; 
-  scene.add(bottomWall);
-
-  // 4. Вычисляем точку соприкосновения шипов
-  // Раз мы повернули модель на 90 градусов, её старая ширина (X) стала высотой (Y).
-  // Значит, расстояние от центра до кончика шипов = половина ширины.
-  const spikeTipDist = boxSize.x / 2;
   
-  // Они должны встретиться в этой точке (верхняя опускается до +dist, нижняя поднимается до -dist)
-  contactY = spikeTipDist;
-  
-  // Стартовая позиция (далеко друг от друга)
-  startY = contactY + boxSize.y * 0.4 + 1.5;
+  wallRight = new THREE.Group();
+  wallRight.add(clone);
+  // Разворачиваем на 180 градусов, чтобы шипы смотрели навстречу
+  wallRight.rotation.y = Math.PI; 
+  scene.add(wallRight);
 
-  topWall.position.y = startY;
-  bottomWall.position.y = -startY;
+  // 4. Вычисляем дистанцию столкновения
+  // Если модель имеет ширину size.x, то её центр до кончика шипов = size.x / 2
+  const halfWidth = boxSize.x / 2;
+  
+  // Точки, где шипы соприкоснутся
+  contactX1 = -halfWidth;
+  contactX2 =  halfWidth;
+  
+  // Стартовые позиции (отъезжают назад)
+  const startOffset = halfWidth + 2.5;
+  startX1 = -startOffset;
+  startX2 =  startOffset;
+
+  // Фиксируем по Y и Z
+  wallLeft.position.set(startX1, 0, 0);
+  wallRight.position.set(startX2, 0, 0);
 
   // 5. Настройка камеры
-  const camDist = Math.max(boxSize.y * 1.5, boxSize.z * 2, 5);
-  camera.position.set(0, 0, camDist);
+  const camDist = Math.max(boxSize.y * 1.5, boxSize.x * 4, 6);
+  camera.position.set(0, boxSize.y * 0.2, camDist);
   controls.target.set(0, 0, 0);
 
   const fit = Math.max(boxSize.x, boxSize.y, boxSize.z) * 2.5;
   const sc = dirLight.shadow.camera;
   sc.left = -fit; sc.right = fit; sc.top = fit; sc.bottom = -fit;
   sc.near = 0.1; sc.far = fit*6; sc.updateProjectionMatrix();
-  dirLight.position.set(fit, fit, fit);
+  dirLight.position.set(fit, fit*1.5, fit*1.2);
 
   // Включаем кнопку
   document.getElementById('loading').style.display = 'none';
@@ -165,7 +167,7 @@ new GLTFLoader().load('./model.glb', (gltf) => {
 
 // ---------- Эффекты при ударе ----------
 function onImpact() {
-  shakeAmt = 0.3; // Сильная тряска
+  shakeAmt = 0.3; // Тряска
   spawnSparks();  // Искры
   playImpactSound(); // Звук
 }
@@ -176,17 +178,17 @@ function spawnSparks() {
   const pos = new Float32Array(N*3);
   const vel = [];
   
-  // Искры вылетают ровно из центра столкновения (0,0,0)
   for (let i=0; i<N; i++) {
-    pos[i*3]   = (Math.random()-0.5) * boxSize.z; // По ширине стены
-    pos[i*3+1] = 0; 
-    pos[i*3+2] = (Math.random()-0.5) * 0.5;
+    // Искры вылетают из точки 0,0,0
+    pos[i*3]   = 0; 
+    pos[i*3+1] = (Math.random()-0.5) * boxSize.y; 
+    pos[i*3+2] = (Math.random()-0.5) * boxSize.z;
     
-    // Разлетаются в стороны и немного вверх/вниз
+    // Разлетаются в стороны
     vel.push(new THREE.Vector3(
-      (Math.random()-0.5) * 15, // Сильно в стороны
-      (Math.random()-0.5) * 10, // Вверх и вниз
-      (Math.random()-0.5) * 5
+      (Math.random()-0.5) * 15,
+      (Math.random()-0.5) * 10,
+      (Math.random()-0.5) * 10
     ));
   }
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
@@ -201,7 +203,7 @@ function spawnSparks() {
     life += 0.016;
     const a = geo.attributes.position.array;
     for (let i=0; i<N; i++) {
-      vel[i].y -= 20*0.016; // Гравитация
+      vel[i].y -= 20*0.016; 
       a[i*3]   += vel[i].x*0.016;
       a[i*3+1] += vel[i].y*0.016;
       a[i*3+2] += vel[i].z*0.016;
@@ -218,7 +220,6 @@ function playImpactSound() {
   if (!audioCtx) return;
   const ctx = audioCtx, now = ctx.currentTime;
 
-  // Глухой мощный удар
   const o1 = ctx.createOscillator(), g1 = ctx.createGain();
   o1.frequency.setValueAtTime(120, now);
   o1.frequency.exponentialRampToValueAtTime(20, now+0.3);
@@ -227,7 +228,6 @@ function playImpactSound() {
   o1.connect(g1).connect(ctx.destination);
   o1.start(now); o1.stop(now+0.6);
 
-  // Металлический лязг
   const o2 = ctx.createOscillator(), g2 = ctx.createGain();
   o2.type = 'sawtooth';
   o2.frequency.setValueAtTime(900, now);
@@ -245,26 +245,23 @@ function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.05);
 
-  if (topWall && bottomWall) {
-    // Изменяем прогресс (от 0 до 1)
+  if (wallLeft && wallRight) {
     if (isCrushing) {
       progress = Math.min(progress + dt * SPEED, 1);
     } else {
       progress = Math.max(progress - dt * SPEED, 0);
     }
 
-    // Двигаем строго по Y (верхняя вниз, нижняя вверх)
-    topWall.position.y = THREE.MathUtils.lerp(startY, contactY, progress);
-    bottomWall.position.y = THREE.MathUtils.lerp(-startY, -contactY, progress);
+    // Двигаем строго по X. Y и Z всегда 0.
+    wallLeft.position.x = THREE.MathUtils.lerp(startX1, contactX1, progress);
+    wallRight.position.x = THREE.MathUtils.lerp(startX2, contactX2, progress);
 
-    // Проверка на столкновение (когда прогресс дошел до 1)
     if (progress >= 0.99 && isCrushing && !hasCollided) {
       hasCollided = true;
       onImpact();
     }
   }
 
-  // Тряска камеры
   if (shakeAmt > 0) {
     shakeAmt = Math.max(0, shakeAmt - dt * 1.5);
     camera.position.x += (Math.random() - 0.5) * shakeAmt;
