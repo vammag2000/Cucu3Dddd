@@ -1,171 +1,337 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Гидравлический пресс с шипами</title>
-    <style>
-        body {
-            margin: 0;
-            padding: 0;
-            overflow: hidden;
-            background-color: #1a1a1a;
-            font-family: sans-serif;
-            touch-action: none;
-        }
-        #canvas-container {
-            width: 100vw;
-            height: 100vh;
-            display: block;
-        }
-        #loading {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            color: #ffffff;
-            font-size: 18px;
-            pointer-events: none;
-        }
-        #crush-btn {
-            position: absolute;
-            bottom: 30px;
-            left: 50%;
-            transform: translateX(-50%);
-            padding: 15px 40px;
-            font-size: 20px;
-            font-weight: bold;
-            color: #ffffff;
-            background-color: #ff4757;
-            border: none;
-            border-radius: 30px;
-            box-shadow: 0 4px 15px rgba(255, 71, 87, 0.4);
-            cursor: pointer;
-            z-index: 10;
-            outline: none;
-            transition: transform 0.1s, background-color 0.2s;
-        }
-        #crush-btn:active {
-            transform: translateX(-50%) scale(0.95);
-            background-color: #ff6b81;
-        }
-    </style>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Гидравлический пресс</title>
+<style>
+  body { margin:0; overflow:hidden; background:#141414; font-family:sans-serif; touch-action:none; }
+  #canvas-container { width:100vw; height:100vh; display:block; }
+  #loading { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+             color:#fff; font-size:18px; text-align:center; padding:0 20px; }
+  #crush-btn {
+    position:absolute; bottom:30px; left:50%; transform:translateX(-50%);
+    padding:15px 40px; font-size:20px; font-weight:bold; color:#fff;
+    background:#ff4757; border:none; border-radius:30px;
+    box-shadow:0 4px 15px rgba(255,71,87,.4); cursor:pointer; z-index:10;
+  }
+  #crush-btn:active { transform:translateX(-50%) scale(0.95); background:#ff6b81; }
+  #crush-btn:disabled { background:#444; box-shadow:none; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+    "cannon-es": "https://unpkg.com/cannon-es@0.20.0/dist/cannon-es.js"
+  }
+}
+</script>
 </head>
 <body>
+<div id="loading">Загрузка модели...</div>
+<div id="canvas-container"></div>
+<button id="crush-btn" disabled>Давить</button>
 
-    <div id="loading">Загрузка модели...</div>
-    <div id="canvas-container"></div>
-    <button id="crush-btn">Давить</button>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import * as CANNON from 'cannon-es';
 
-    <script>
-        const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x1a1a1a);
+// ---------- Рендерер ----------
+const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.getElementById('canvas-container').appendChild(renderer.domElement);
 
-        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.set(0, 2, 7);
+// ---------- Сцена ----------
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x141414);
 
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-        document.getElementById('canvas-container').appendChild(renderer.domElement);
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
-        const ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
-        scene.add(ambientLight);
+// ---------- Камера ----------
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth/window.innerHeight, 0.1, 2000);
+camera.position.set(0, 3, 9);
 
-        const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
-        dirLight.position.set(5, 10, 7.5);
-        scene.add(dirLight);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.maxPolarAngle = Math.PI/2 - 0.02;
+controls.minDistance = 2;
+controls.maxDistance = 40;
 
-        const controls = new THREE.OrbitControls(camera, renderer.domElement);
-        controls.enableDamping = true;
+// ---------- Свет ----------
+scene.add(new THREE.HemisphereLight(0xffffff, 0x333333, 0.7));
 
-        let wall1 = null;
-        let wall2 = null;
+const dirLight = new THREE.DirectionalLight(0xffffff, 2.2);
+dirLight.castShadow = true;
+dirLight.shadow.mapSize.set(2048, 2048);
+dirLight.shadow.bias = -0.0005;
+scene.add(dirLight);
 
-        let isCrushing = false;
-        let progress = 0;
-        
-        // Стартовые и конечные точки для реалистичного сближения
-        const startX1 = -2.5; 
-        const startX2 = 2.5;  
-        const targetX1 = -0.55; // Точка смыкания шипов
-        const targetX2 = 0.55;  
+const fillLight = new THREE.DirectionalLight(0x88aaff, 0.6);
+fillLight.position.set(-6, 5, -6);
+scene.add(fillLight);
 
-        const loader = new THREE.GLTFLoader();
-        loader.load(
-            'model.glb',
-            (gltf) => {
-                wall1 = gltf.scene;
-                
-                // Левая стена: шипы смотрят вправо (к центру)
-                wall1.position.set(startX1, 0, 0);
-                wall1.rotation.y = 0; 
-                scene.add(wall1);
+// ---------- Земля ----------
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(200, 200),
+  new THREE.MeshStandardMaterial({ color:0x2a2a2a, roughness:0.92, metalness:0.05 })
+);
+ground.rotation.x = -Math.PI/2;
+ground.receiveShadow = true;
+scene.add(ground);
 
-                // Правая стена: клонируем и разворачиваем на 180 градусов (шипы смотрят влево, к центру)
-                wall2 = wall1.clone();
-                wall2.position.set(startX2, 0, 0);
-                wall2.rotation.y = Math.PI; // Разворот лицом к первой стене
-                scene.add(wall2);
+// ---------- Физика ----------
+const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -20, 0) });
+world.broadphase = new CANNON.SAPBroadphase(world);
+world.allowSleep = true;
 
-                document.getElementById('loading').style.display = 'none';
-            },
-            (xhr) => {
-                if (xhr.lengthComputable) {
-                    const percent = Math.round((xhr.loaded / xhr.total) * 100);
-                    document.getElementById('loading').innerText = `Загрузка: ${percent}%`;
-                }
-            },
-            (error) => {
-                console.error('Ошибка:', error);
-                document.getElementById('loading').innerText = 'Ошибка загрузки model.glb!';
-            }
-        );
+const groundBody = new CANNON.Body({ mass:0, shape:new CANNON.Plane() });
+groundBody.quaternion.setFromEuler(-Math.PI/2, 0, 0);
+world.addBody(groundBody);
 
-        const btn = document.getElementById('crush-btn');
-        btn.addEventListener('click', () => {
-            isCrushing = !isCrushing;
-            btn.innerText = isCrushing ? 'Раздвинуть' : 'Давить';
-        });
+const matGround = new CANNON.Material('ground');
+const matWall   = new CANNON.Material('wall');
+groundBody.material = matGround;
 
-        // Функция физического замедления (эффект тяжести пресса)
-        function easeOutBack(x) {
-            const c1 = 1.70158;
-            const c3 = c1 + 1;
-            return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2);
-        }
+world.addContactMaterial(new CANNON.ContactMaterial(matGround, matWall, {
+  friction:0.4, restitution:0.0
+}));
+world.addContactMaterial(new CANNON.ContactMaterial(matWall, matWall, {
+  friction:0.4, restitution:0.10   // металл об металл — почти не отскакивает, но чуть звенит
+}));
 
-        function animate() {
-            requestAnimationFrame(animate);
+// ---------- Состояние ----------
+let wall1=null, wall2=null, body1=null, body2=null;
+let modelHeight = 2, modelHalfWidth = 1;
+let isCrushing = false, hasCollided = false;
+let audioCtx = null;
+let shakeAmt = 0;
 
-            if (wall1 && wall2) {
-                if (isCrushing) {
-                    if (progress < 1) progress += 0.015; // Плавный тяжелый ход
-                } else {
-                    if (progress > 0) progress -= 0.02;
-                }
+const MASS         = 300;     // кг — меняйте для "тяжести"
+const PRESS_FORCE  = 8000;    // Н — сила пресса
+const PULL_FORCE   = 6000;    // Н — сила раздвигания
+const SPAWN_GAP    = 3.0;
 
-                // Применяем физическую функцию движения с легким упором
-                const easedProgress = Math.min(Math.max(progress, 0), 1);
-                
-                wall1.position.x = THREE.MathUtils.lerp(startX1, targetX1, easedProgress);
-                wall2.position.x = THREE.MathUtils.lerp(startX2, targetX2, easedProgress);
-            }
+// ---------- Загрузка ----------
+new GLTFLoader().load('./model.glb', (gltf) => {
+  const src = gltf.scene;
 
-            controls.update();
-            renderer.render(scene, camera);
-        }
+  // Центруем по bbox в локальных координатах
+  const box = new THREE.Box3().setFromObject(src);
+  const size = new THREE.Vector3();  box.getSize(size);
+  const center = new THREE.Vector3(); box.getCenter(center);
+  src.position.sub(center);
+  modelHeight = size.y;
+  modelHalfWidth = size.x / 2;
 
-        animate();
+  src.traverse(o => {
+    if (o.isMesh) {
+      o.castShadow = true;
+      o.receiveShadow = true;
+      if (o.material) o.material.envMapIntensity = 1.0;
+    }
+  });
 
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        });
-    </script>
+  // Левая стена (шипы в +X)
+  wall1 = new THREE.Group();
+  wall1.add(src);
+  scene.add(wall1);
+
+  // Правая — клон, развёрнут на 180°, шипы в -X
+  const clone = src.clone(true);
+  clone.traverse(o => { if (o.isMesh && o.material) o.material = o.material.clone(); });
+  wall2 = new THREE.Group();
+  wall2.add(clone);
+  wall2.rotation.y = Math.PI;
+  scene.add(wall2);
+
+  // Физические тела — коробки размером с bbox
+  const halfExt = new CANNON.Vec3(size.x/2, size.y/2, size.z/2);
+  const shape = new CANNON.Box(halfExt);
+
+  function makeBody(x) {
+    const b = new CANNON.Body({ mass:MASS, material:matWall, linearDamping:0.05 });
+    b.addShape(shape);
+    b.position.set(x, size.y/2 + 0.02, 0);
+    b.linearFactor.set(1, 1, 0);   // X и Y свободны (скользит по земле), Z залочен
+    b.angularFactor.set(0, 0, 0);  // не опрокидывается
+    b.allowSleep = false;
+    world.addBody(b);
+    return b;
+  }
+  body1 = makeBody(-SPAWN_GAP);
+  body2 = makeBody( SPAWN_GAP);
+
+  // Один удар = одно событие
+  body1.addEventListener('collide', (e) => {
+    if (e.body === body2 && !hasCollided) {
+      hasCollided = true;
+      onImpact();
+    }
+  });
+
+  // Камера под модель
+  const camDist = Math.max(SPAWN_GAP*2.4, size.y*2.2, 6);
+  camera.position.set(0, size.y*1.1, camDist);
+  controls.target.set(0, size.y*0.5, 0);
+  controls.minDistance = size.x;
+  controls.maxDistance = camDist*3;
+
+  // Тени под модель
+  const fit = Math.max(size.x, size.y, size.z) * 2.5;
+  const sc = dirLight.shadow.camera;
+  sc.left = -fit; sc.right = fit; sc.top = fit; sc.bottom = -fit;
+  sc.near = 0.1; sc.far = fit*6; sc.updateProjectionMatrix();
+  dirLight.position.set(fit, fit*1.5, fit*1.2);
+
+  document.getElementById('loading').style.display = 'none';
+  const btn = document.getElementById('crush-btn');
+  btn.disabled = false;
+
+  btn.addEventListener('click', () => {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    isCrushing = !isCrushing;
+    if (isCrushing) hasCollided = false;
+    btn.innerText = isCrushing ? 'Раздвинуть' : 'Давить';
+  });
+},
+(xhr) => {
+  if (xhr.total) {
+    document.getElementById('loading').innerText =
+      `Загрузка: ${Math.round(xhr.loaded/xhr.total*100)}%`;
+  }
+},
+(err) => {
+  console.error(err);
+  document.getElementById('loading').innerText =
+    'Ошибка загрузки model.glb.\nПроверьте путь ./model.glb и что GitHub Pages включён.';
+});
+
+// ---------- Эффекты при ударе ----------
+function onImpact() {
+  shakeAmt = 0.35;
+  spawnDust();
+  playImpactSound();
+}
+
+function spawnDust() {
+  const N = 80;
+  const geo = new THREE.BufferGeometry();
+  const pos = new Float32Array(N*3);
+  const vel = [];
+  const cx = 0, cy = modelHeight*0.5;
+  for (let i=0; i<N; i++) {
+    pos[i*3]   = (Math.random()-0.5)*0.5;
+    pos[i*3+1] = cy + (Math.random()-0.5)*modelHeight*0.7;
+    pos[i*3+2] = (Math.random()-0.5)*0.5;
+    vel.push(new THREE.Vector3(
+      (Math.random()-0.5)*5,
+      Math.random()*6,
+      (Math.random()-0.5)*5
+    ));
+  }
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const mat = new THREE.PointsMaterial({
+    color:0xbbbbbb, size:0.06, transparent:true, opacity:0.9, depthWrite:false
+  });
+  const pts = new THREE.Points(geo, mat);
+  scene.add(pts);
+
+  let life = 0;
+  const tick = () => {
+    life += 0.016;
+    const a = geo.attributes.position.array;
+    for (let i=0; i<N; i++) {
+      vel[i].y -= 9.8*0.016;
+      a[i*3]   += vel[i].x*0.016;
+      a[i*3+1] += vel[i].y*0.016;
+      a[i*3+2] += vel[i].z*0.016;
+      if (a[i*3+1] < 0.02) { a[i*3+1]=0.02; vel[i].y=0; }
+    }
+    geo.attributes.position.needsUpdate = true;
+    mat.opacity = Math.max(0, 0.9 - life*0.9);
+    if (life < 1.2) requestAnimationFrame(tick);
+    else { scene.remove(pts); geo.dispose(); mat.dispose(); }
+  };
+  tick();
+}
+
+function playImpactSound() {
+  if (!audioCtx) return;
+  const ctx = audioCtx, now = ctx.currentTime;
+
+  // Глухой удар
+  const o1 = ctx.createOscillator(), g1 = ctx.createGain();
+  o1.frequency.setValueAtTime(80, now);
+  o1.frequency.exponentialRampToValueAtTime(30, now+0.25);
+  g1.gain.setValueAtTime(0.6, now);
+  g1.gain.exponentialRampToValueAtTime(0.001, now+0.35);
+  o1.connect(g1).connect(ctx.destination);
+  o1.start(now); o1.stop(now+0.4);
+
+  // Металлический звон
+  const o2 = ctx.createOscillator(), g2 = ctx.createGain();
+  o2.type = 'triangle';
+  o2.frequency.setValueAtTime(1200, now);
+  o2.frequency.exponentialRampToValueAtTime(400, now+0.15);
+  g2.gain.setValueAtTime(0.12, now);
+  g2.gain.exponentialRampToValueAtTime(0.001, now+0.25);
+  o2.connect(g2).connect(ctx.destination);
+  o2.start(now); o2.stop(now+0.3);
+}
+
+// ---------- Цикл ----------
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+
+  if (body1 && body2) {
+    if (isCrushing) {
+      body1.applyForce(new CANNON.Vec3( PRESS_FORCE, 0, 0));
+      body2.applyForce(new CANNON.Vec3(-PRESS_FORCE, 0, 0));
+    } else {
+      const dx = body2.position.x - body1.position.x;
+      if (dx < SPAWN_GAP*2 - 0.3) {
+        body1.applyForce(new CANNON.Vec3(-PULL_FORCE, 0, 0));
+        body2.applyForce(new CANNON.Vec3( PULL_FORCE, 0, 0));
+      }
+    }
+  }
+
+  world.step(1/60, dt, 3);
+
+  if (wall1 && body1) wall1.position.copy(body1.position);
+  if (wall2 && body2) wall2.position.copy(body2.position);
+
+  if (shakeAmt > 0) {
+    shakeAmt = Math.max(0, shakeAmt - dt*1.5);
+    camera.position.x += (Math.random()-0.5)*shakeAmt;
+    camera.position.y += (Math.random()-0.5)*shakeAmt;
+  }
+
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
 </body>
 </html>
