@@ -22,8 +22,7 @@
 {
   "imports": {
     "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
-    "cannon-es": "https://unpkg.com/cannon-es@0.20.0/dist/cannon-es.js"
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
   }
 }
 </script>
@@ -38,7 +37,6 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import * as CANNON from 'cannon-es';
 
 // ---------- Рендерер ----------
 const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
@@ -60,19 +58,15 @@ scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
 // ---------- Камера ----------
 const camera = new THREE.PerspectiveCamera(50, window.innerWidth/window.innerHeight, 0.1, 2000);
-camera.position.set(0, 3, 9);
-
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.maxPolarAngle = Math.PI/2 - 0.02;
-controls.minDistance = 2;
-controls.maxDistance = 40;
 
 // ---------- Свет ----------
-scene.add(new THREE.HemisphereLight(0xffffff, 0x333333, 0.7));
+scene.add(new THREE.HemisphereLight(0xffffff, 0x333333, 0.8));
 
-const dirLight = new THREE.DirectionalLight(0xffffff, 2.2);
+const dirLight = new THREE.DirectionalLight(0xffffff, 2.0);
 dirLight.castShadow = true;
 dirLight.shadow.mapSize.set(2048, 2048);
 dirLight.shadow.bias = -0.0005;
@@ -91,49 +85,27 @@ ground.rotation.x = -Math.PI/2;
 ground.receiveShadow = true;
 scene.add(ground);
 
-// ---------- Физика ----------
-const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -20, 0) });
-world.broadphase = new CANNON.SAPBroadphase(world);
-world.allowSleep = true;
-
-const groundBody = new CANNON.Body({ mass:0, shape:new CANNON.Plane() });
-groundBody.quaternion.setFromEuler(-Math.PI/2, 0, 0);
-world.addBody(groundBody);
-
-const matGround = new CANNON.Material('ground');
-const matWall   = new CANNON.Material('wall');
-groundBody.material = matGround;
-
-world.addContactMaterial(new CANNON.ContactMaterial(matGround, matWall, {
-  friction:0.4, restitution:0.0
-}));
-world.addContactMaterial(new CANNON.ContactMaterial(matWall, matWall, {
-  friction:0.4, restitution:0.10   // металл об металл — почти не отскакивает, но чуть звенит
-}));
-
 // ---------- Состояние ----------
-let wall1=null, wall2=null, body1=null, body2=null;
-let modelHeight = 2, modelHalfWidth = 1;
+let wall1=null, wall2=null;
 let isCrushing = false, hasCollided = false;
 let audioCtx = null;
 let shakeAmt = 0;
 
-const MASS         = 300;     // кг — меняйте для "тяжести"
-const PRESS_FORCE  = 8000;    // Н — сила пресса
-const PULL_FORCE   = 6000;    // Н — сила раздвигания
-const SPAWN_GAP    = 3.0;
+// Настройки движения
+let startX1 = -4, startX2 = 4;
+let targetX1 = 0, targetX2 = 0;
+let progress = 0; // 0 = раздвинуто, 1 = сжато
+const SPEED = 1.5; // Скорость сжатия (1.5 = сжимается за ~0.7 сек)
 
 // ---------- Загрузка ----------
 new GLTFLoader().load('./model.glb', (gltf) => {
   const src = gltf.scene;
 
-  // Центруем по bbox в локальных координатах
+  // 1. Центрируем модель идеально в нуле координат
   const box = new THREE.Box3().setFromObject(src);
   const size = new THREE.Vector3();  box.getSize(size);
   const center = new THREE.Vector3(); box.getCenter(center);
-  src.position.sub(center);
-  modelHeight = size.y;
-  modelHalfWidth = size.x / 2;
+  src.position.sub(center); // Сдвигаем модель так, чтобы её центр был ровно на (0,0,0)
 
   src.traverse(o => {
     if (o.isMesh) {
@@ -143,58 +115,48 @@ new GLTFLoader().load('./model.glb', (gltf) => {
     }
   });
 
-  // Левая стена (шипы в +X)
+  // 2. Вычисляем дистанцию, на которой шипы соприкоснутся
+  // size.x — это общая ширина стены вместе с шипами.
+  // Чтобы шипы встретились, левая стена должна сдвинуться на size.x / 2, и правая тоже.
+  const wallHalfWidth = size.x / 2;
+  targetX1 = -wallHalfWidth; 
+  targetX2 =  wallHalfWidth;
+
+  // Стартовые позиции (далеко друг от друга)
+  startX1 = -wallHalfWidth - 2.5;
+  startX2 =  wallHalfWidth + 2.5;
+
+  // 3. Создаем левую стену
   wall1 = new THREE.Group();
   wall1.add(src);
+  wall1.position.set(startX1, 0, 0); // Y=0, Z=0 — строго на оси
   scene.add(wall1);
 
-  // Правая — клон, развёрнут на 180°, шипы в -X
+  // 4. Создаем правую стену (клон)
   const clone = src.clone(true);
   clone.traverse(o => { if (o.isMesh && o.material) o.material = o.material.clone(); });
+  
   wall2 = new THREE.Group();
   wall2.add(clone);
-  wall2.rotation.y = Math.PI;
+  // Разворачиваем на 180 градусов вокруг Y, чтобы шипы смотрели влево (навстречу)
+  wall2.rotation.y = Math.PI; 
+  wall2.position.set(startX2, 0, 0);
   scene.add(wall2);
 
-  // Физические тела — коробки размером с bbox
-  const halfExt = new CANNON.Vec3(size.x/2, size.y/2, size.z/2);
-  const shape = new CANNON.Box(halfExt);
-
-  function makeBody(x) {
-    const b = new CANNON.Body({ mass:MASS, material:matWall, linearDamping:0.05 });
-    b.addShape(shape);
-    b.position.set(x, size.y/2 + 0.02, 0);
-    b.linearFactor.set(1, 1, 0);   // X и Y свободны (скользит по земле), Z залочен
-    b.angularFactor.set(0, 0, 0);  // не опрокидывается
-    b.allowSleep = false;
-    world.addBody(b);
-    return b;
-  }
-  body1 = makeBody(-SPAWN_GAP);
-  body2 = makeBody( SPAWN_GAP);
-
-  // Один удар = одно событие
-  body1.addEventListener('collide', (e) => {
-    if (e.body === body2 && !hasCollided) {
-      hasCollided = true;
-      onImpact();
-    }
-  });
-
-  // Камера под модель
-  const camDist = Math.max(SPAWN_GAP*2.4, size.y*2.2, 6);
-  camera.position.set(0, size.y*1.1, camDist);
-  controls.target.set(0, size.y*0.5, 0);
+  // 5. Настройка камеры и света под размеры модели
+  const camDist = Math.max(6, size.y * 2, size.x * 3);
+  camera.position.set(0, size.y * 0.5, camDist);
+  controls.target.set(0, 0, 0);
   controls.minDistance = size.x;
-  controls.maxDistance = camDist*3;
+  controls.maxDistance = camDist * 3;
 
-  // Тени под модель
   const fit = Math.max(size.x, size.y, size.z) * 2.5;
   const sc = dirLight.shadow.camera;
   sc.left = -fit; sc.right = fit; sc.top = fit; sc.bottom = -fit;
   sc.near = 0.1; sc.far = fit*6; sc.updateProjectionMatrix();
   dirLight.position.set(fit, fit*1.5, fit*1.2);
 
+  // Включаем кнопку
   document.getElementById('loading').style.display = 'none';
   const btn = document.getElementById('crush-btn');
   btn.disabled = false;
@@ -214,36 +176,35 @@ new GLTFLoader().load('./model.glb', (gltf) => {
 },
 (err) => {
   console.error(err);
-  document.getElementById('loading').innerText =
-    'Ошибка загрузки model.glb.\nПроверьте путь ./model.glb и что GitHub Pages включён.';
+  document.getElementById('loading').innerText = 'Ошибка загрузки model.glb.';
 });
 
 // ---------- Эффекты при ударе ----------
 function onImpact() {
-  shakeAmt = 0.35;
-  spawnDust();
-  playImpactSound();
+  shakeAmt = 0.25; // Тряска
+  spawnDust();     // Пыль/искры
+  playImpactSound(); // Звук
 }
 
 function spawnDust() {
-  const N = 80;
+  const N = 60;
   const geo = new THREE.BufferGeometry();
   const pos = new Float32Array(N*3);
   const vel = [];
-  const cx = 0, cy = modelHeight*0.5;
+  // Берем высоту по центру столкновения
   for (let i=0; i<N; i++) {
     pos[i*3]   = (Math.random()-0.5)*0.5;
-    pos[i*3+1] = cy + (Math.random()-0.5)*modelHeight*0.7;
+    pos[i*3+1] = (Math.random()-0.5)*2.0; // Разлетаются по высоте
     pos[i*3+2] = (Math.random()-0.5)*0.5;
     vel.push(new THREE.Vector3(
-      (Math.random()-0.5)*5,
-      Math.random()*6,
-      (Math.random()-0.5)*5
+      (Math.random()-0.5)*8, // Разлет в стороны
+      Math.random()*8,       // Вверх
+      (Math.random()-0.5)*8
     ));
   }
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   const mat = new THREE.PointsMaterial({
-    color:0xbbbbbb, size:0.06, transparent:true, opacity:0.9, depthWrite:false
+    color:0xffaa00, size:0.08, transparent:true, opacity:1, depthWrite:false
   });
   const pts = new THREE.Points(geo, mat);
   scene.add(pts);
@@ -253,15 +214,14 @@ function spawnDust() {
     life += 0.016;
     const a = geo.attributes.position.array;
     for (let i=0; i<N; i++) {
-      vel[i].y -= 9.8*0.016;
+      vel[i].y -= 15*0.016; // Гравитация для частиц
       a[i*3]   += vel[i].x*0.016;
       a[i*3+1] += vel[i].y*0.016;
       a[i*3+2] += vel[i].z*0.016;
-      if (a[i*3+1] < 0.02) { a[i*3+1]=0.02; vel[i].y=0; }
     }
     geo.attributes.position.needsUpdate = true;
-    mat.opacity = Math.max(0, 0.9 - life*0.9);
-    if (life < 1.2) requestAnimationFrame(tick);
+    mat.opacity = Math.max(0, 1 - life*1.5);
+    if (life < 1.0) requestAnimationFrame(tick);
     else { scene.remove(pts); geo.dispose(); mat.dispose(); }
   };
   tick();
@@ -271,55 +231,61 @@ function playImpactSound() {
   if (!audioCtx) return;
   const ctx = audioCtx, now = ctx.currentTime;
 
-  // Глухой удар
+  // Тяжелый удар
   const o1 = ctx.createOscillator(), g1 = ctx.createGain();
-  o1.frequency.setValueAtTime(80, now);
-  o1.frequency.exponentialRampToValueAtTime(30, now+0.25);
-  g1.gain.setValueAtTime(0.6, now);
-  g1.gain.exponentialRampToValueAtTime(0.001, now+0.35);
+  o1.frequency.setValueAtTime(100, now);
+  o1.frequency.exponentialRampToValueAtTime(20, now+0.3);
+  g1.gain.setValueAtTime(0.8, now);
+  g1.gain.exponentialRampToValueAtTime(0.001, now+0.4);
   o1.connect(g1).connect(ctx.destination);
-  o1.start(now); o1.stop(now+0.4);
+  o1.start(now); o1.stop(now+0.5);
 
-  // Металлический звон
+  // Лязг металла
   const o2 = ctx.createOscillator(), g2 = ctx.createGain();
   o2.type = 'triangle';
-  o2.frequency.setValueAtTime(1200, now);
-  o2.frequency.exponentialRampToValueAtTime(400, now+0.15);
-  g2.gain.setValueAtTime(0.12, now);
-  g2.gain.exponentialRampToValueAtTime(0.001, now+0.25);
+  o2.frequency.setValueAtTime(800, now);
+  o2.frequency.exponentialRampToValueAtTime(200, now+0.2);
+  g2.gain.setValueAtTime(0.2, now);
+  g2.gain.exponentialRampToValueAtTime(0.001, now+0.3);
   o2.connect(g2).connect(ctx.destination);
-  o2.start(now); o2.stop(now+0.3);
+  o2.start(now); o2.stop(now+0.4);
 }
 
-// ---------- Цикл ----------
+// ---------- Цикл анимации ----------
 const clock = new THREE.Clock();
 
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.05);
 
-  if (body1 && body2) {
+  if (wall1 && wall2) {
+    // Изменяем прогресс (от 0 до 1)
     if (isCrushing) {
-      body1.applyForce(new CANNON.Vec3( PRESS_FORCE, 0, 0));
-      body2.applyForce(new CANNON.Vec3(-PRESS_FORCE, 0, 0));
+      progress = Math.min(progress + dt * SPEED, 1);
     } else {
-      const dx = body2.position.x - body1.position.x;
-      if (dx < SPAWN_GAP*2 - 0.3) {
-        body1.applyForce(new CANNON.Vec3(-PULL_FORCE, 0, 0));
-        body2.applyForce(new CANNON.Vec3( PULL_FORCE, 0, 0));
-      }
+      progress = Math.max(progress - dt * SPEED, 0);
+    }
+
+    // Плавное движение (можно заменить на progress для резкого движения)
+    // Здесь используется Math.pow для эффекта "нарастания давления"
+    const easedProgress = 1 - Math.pow(1 - progress, 3); 
+
+    // Двигаем строго по X
+    wall1.position.x = THREE.MathUtils.lerp(startX1, targetX1, easedProgress);
+    wall2.position.x = THREE.MathUtils.lerp(startX2, targetX2, easedProgress);
+
+    // Проверка на столкновение (когда прогресс дошел до 1)
+    if (progress >= 0.99 && isCrushing && !hasCollided) {
+      hasCollided = true;
+      onImpact();
     }
   }
 
-  world.step(1/60, dt, 3);
-
-  if (wall1 && body1) wall1.position.copy(body1.position);
-  if (wall2 && body2) wall2.position.copy(body2.position);
-
+  // Тряска камеры
   if (shakeAmt > 0) {
-    shakeAmt = Math.max(0, shakeAmt - dt*1.5);
-    camera.position.x += (Math.random()-0.5)*shakeAmt;
-    camera.position.y += (Math.random()-0.5)*shakeAmt;
+    shakeAmt = Math.max(0, shakeAmt - dt * 1.5);
+    camera.position.x += (Math.random() - 0.5) * shakeAmt;
+    camera.position.y += (Math.random() - 0.5) * shakeAmt;
   }
 
   controls.update();
