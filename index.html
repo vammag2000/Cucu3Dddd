@@ -1,417 +1,48 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html>
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Гидравлический пресс: Гиперреализм и Кровь</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Тест загрузки</title>
     <style>
-        body { margin:0; overflow:hidden; background:#0a0a0a; font-family:sans-serif; touch-action:none; user-select:none; }
-        #canvas-container { width:100vw; height:100vh; display:block; }
-        #ui-top { position:absolute; top:20px; left:50%; transform:translateX(-50%); display:flex; gap:10px; z-index:10; width:95%; justify-content:center; flex-wrap:wrap; }
-        .spawn-btn { padding:12px 20px; font-size:16px; font-weight:bold; color:#fff; background:rgba(30,30,30,0.85); border:1px solid #555; border-radius:12px; backdrop-filter:blur(5px); cursor:pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.6); transition: transform 0.1s; }
-        .spawn-btn:active { transform: scale(0.95); background:#444; }
-        #crush-btn { position:absolute; bottom:30px; left:50%; transform:translateX(-50%); padding:16px 50px; font-size:22px; font-weight:bold; color:#fff; background:linear-gradient(135deg, #ff4757, #c0392b); border:none; border-radius:35px; box-shadow:0 6px 20px rgba(255,71,87,0.5); cursor:pointer; z-index:10; transition: transform 0.1s; }
-        #crush-btn:active { transform:translateX(-50%) scale(0.95); }
-        #crush-btn:disabled { background:#333; box-shadow:none; color:#777; }
-        #fps { position:absolute; top:80px; right:20px; color:#0f0; font-family:monospace; font-size:14px; background:rgba(0,0,0,0.6); padding:4px 8px; border-radius:5px; z-index:20; }
-        
-        #loading-container { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); color:#fff; font-size:18px; z-index:100; text-align:center; width:90%; max-width:350px; background: rgba(0,0,0,0.8); padding: 20px; border-radius: 15px;}
-        #loading-text { margin-bottom: 10px; font-weight: bold; }
-        #loading-bar { width:100%; height:10px; background:#333; border-radius:5px; overflow:hidden; }
-        #loading-progress { width:0%; height:100%; background:#ff4757; transition: width 0.2s; }
-        #error-msg { position:absolute; top:20%; left:50%; transform:translateX(-50%); background:rgba(255,0,0,0.95); color:white; padding:15px; border-radius:10px; font-size:16px; display:none; z-index:200; text-align:center; width:85%; pointer-events:none; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.5); border: 2px solid #ffaaaa;}
+        body { background: #111; color: #fff; font-family: sans-serif; text-align: center; padding: 50px; }
+        #status { font-size: 20px; font-weight: bold; margin-bottom: 20px; }
+        .error { color: #ff4757; }
+        .success { color: #2ed573; }
     </style>
     <script type="importmap">
     {
         "imports": {
             "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
-            "cannon-es": "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/+esm"
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
         }
     }
     </script>
 </head>
 <body>
-    <div id="loading-container">
-        <div id="loading-text">Загрузка пресса (model.glb)...</div>
-        <div id="loading-bar"><div id="loading-progress"></div></div>
-    </div>
-    <div id="error-msg">Ошибка загрузки</div>
-    <div id="canvas-container"></div>
-    <div id="fps">FPS: --</div>
-
-    <div id="ui-top">
-        <button class="spawn-btn" id="btn-balloon">🎈 Шарик</button>
-        <button class="spawn-btn" id="btn-cooler">🥤 Кулер</button>
-        <button class="spawn-btn" id="btn-custom">🍗 Куриное бедро</button>
-    </div>
-    <button id="crush-btn" disabled>ДАВИТЬ</button>
-
+    <div id="status">Начинаю загрузку...</div>
     <script type="module">
         import * as THREE from 'three';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-        import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-        import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-        import { SkeletonUtils } from 'three/addons/utils/SkeletonUtils.js';
-        import { DecalGeometry } from 'three/addons/geometries/DecalGeometry.js';
-        import * as CANNON from 'cannon-es';
 
-        // --- 1. АУДИО ---
-        let audioCtx = null;
-        function initAudio() { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
-        function playSquishSound() {
-            if (!audioCtx) return;
-            const t = audioCtx.currentTime; const osc = audioCtx.createOscillator(); const oscGain = audioCtx.createGain();
-            osc.type = 'sine'; osc.frequency.setValueAtTime(200, t); osc.frequency.exponentialRampToValueAtTime(50, t + 0.3);
-            oscGain.gain.setValueAtTime(0.5, t); oscGain.gain.exponentialRampToValueAtTime(0.01, t + 0.3);
-            osc.connect(oscGain).connect(audioCtx.destination); osc.start(t); osc.stop(t + 0.3);
-        }
-        function playCrunchSound() {
-            if (!audioCtx) return;
-            const t = audioCtx.currentTime; const bufSize = audioCtx.sampleRate * 0.2; const buffer = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate); const data = buffer.getChannelData(0);
-            for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
-            const noise = audioCtx.createBufferSource(); noise.buffer = buffer; const filter = audioCtx.createBiquadFilter(); filter.type = 'bandpass'; filter.frequency.value = 1000;
-            const gain = audioCtx.createGain(); gain.gain.setValueAtTime(1, t); gain.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
-            noise.connect(filter).connect(gain).connect(audioCtx.destination); noise.start(t);
-        }
-        function playPopSound() {
-            if (!audioCtx) return;
-            const t = audioCtx.currentTime; const osc = audioCtx.createOscillator(); const oscGain = audioCtx.createGain();
-            osc.type = 'sine'; osc.frequency.setValueAtTime(150, t); osc.frequency.exponentialRampToValueAtTime(40, t + 0.1);
-            oscGain.gain.setValueAtTime(1, t); oscGain.gain.exponentialRampToValueAtTime(0.01, t + 0.2);
-            osc.connect(oscGain).connect(audioCtx.destination); osc.start(t); osc.stop(t + 0.2);
-        }
-        function playMetalClankSound() {
-            if (!audioCtx) return;
-            const t = audioCtx.currentTime;
-            [800, 1200, 1500].forEach((freq, i) => {
-                const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
-                osc.type = 'triangle'; osc.frequency.setValueAtTime(freq, t);
-                gain.gain.setValueAtTime(0.15 - i * 0.03, t); gain.gain.exponentialRampToValueAtTime(0.01, t + 0.4);
-                osc.connect(gain).connect(audioCtx.destination); osc.start(t); osc.stop(t + 0.4);
-            });
-        }
-
-        // --- 2. БАЗА ---
-        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-        renderer.setSize(window.innerWidth, window.innerHeight); renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); 
-        renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap; 
-        document.getElementById('canvas-container').appendChild(renderer.domElement);
-
-        const scene = new THREE.Scene(); scene.background = new THREE.Color(0x141414);
-        const pmrem = new THREE.PMREMGenerator(renderer); scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-        const camera = new THREE.PerspectiveCamera(50, window.innerWidth/window.innerHeight, 0.1, 100);
-        const controls = new OrbitControls(camera, renderer.domElement); controls.enableDamping = true;
-
-        scene.add(new THREE.HemisphereLight(0xffffff, 0x333333, 1.0));
-        const dirLight = new THREE.DirectionalLight(0xffffff, 1.5); dirLight.position.set(5, 10, 7); dirLight.castShadow = true;
-        dirLight.shadow.mapSize.width = 1024; dirLight.shadow.mapSize.height = 1024; dirLight.shadow.bias = -0.001; scene.add(dirLight);
-
-        const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -20, 0) }); world.allowSleep = true; 
-        const groundBody = new CANNON.Body({ mass: 0, shape: new CANNON.Plane() });
-        groundBody.quaternion.setFromEuler(-Math.PI/2, 0, 0); groundBody.position.y = -1.5; world.addBody(groundBody);
-        const groundMesh = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.9, metalness: 0.1 }));
-        groundMesh.rotation.x = -Math.PI/2; groundMesh.position.y = -1.5; groundMesh.receiveShadow = true; scene.add(groundMesh);
-
-        // --- 3. ПЕРЕМЕННЫЕ ---
-        let wallLeft, wallRight;
-        let isCrushing = false; let progress = 0; const SPEED = 6.0; 
-        let startX1, startX2, targetX1, targetX2;
-        const props = []; const clock = new THREE.Clock();
-        let kostyaModelTemplate = null; 
-
-        // --- 4. ПОШАГОВАЯ ЗАГРУЗКА (Чтобы понять, что зависает) ---
+        const status = document.getElementById('status');
         const loader = new GLTFLoader();
-        const dracoLoader = new DRACOLoader(); dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/'); loader.setDRACOLoader(dracoLoader);
 
-        const loadWithTimeout = (url, timeoutMs = 15000) => {
-            return new Promise((resolve, reject) => {
-                const timer = setTimeout(() => reject(new Error(`Таймаут загрузки файла: ${url}`)), timeoutMs);
-                loader.load(url, 
-                    (res) => { clearTimeout(timer); resolve(res); }, 
-                    (xhr) => {
-                        if (xhr.total > 0) {
-                            const percent = (xhr.loaded / xhr.total) * 100;
-                            document.getElementById('loading-progress').style.width = percent + '%';
-                        }
-                    },
-                    (err) => { clearTimeout(timer); reject(new Error(`Не найден или поврежден файл: ${url}`)); }
-                );
-            });
-        };
-
-        async function startLoading() {
-            try {
-                // 1. Загрузка пресса
-                const pressGltf = await loadWithTimeout('./model.glb');
-                
-                // 2. Загрузка курицы
-                document.getElementById('loading-text').innerText = 'Загрузка курицы (life.glb)...';
-                document.getElementById('loading-progress').style.width = '0%';
-                const lifeGltf = await loadWithTimeout('./life.glb');
-
-                // 3. Загрузка кости
-                document.getElementById('loading-text').innerText = 'Загрузка кости (kostya.glb)...';
-                document.getElementById('loading-progress').style.width = '0%';
-                const kostyaGltf = await loadWithTimeout('./kostya.glb');
-
-                // Инициализация после успешной загрузки
-                initScene(pressGltf, lifeGltf, kostyaGltf);
-
-            } catch (err) {
-                document.getElementById('loading-container').style.display = 'none';
-                document.getElementById('error-msg').style.display = 'block';
-                document.getElementById('error-msg').innerHTML = `ОШИБКА ЗАГРУЗКИ:<br><br>${err.message}<br><br>Проверьте, что файл лежит в папке с index.html и называется строго (без больших букв).`;
+        // Пытаемся загрузить только пресс
+        loader.load('./model.glb', 
+            (gltf) => {
+                status.innerText = "УСПЕХ! model.glb загружен.";
+                status.className = "success";
+            },
+            (xhr) => {
+                status.innerText = `Загрузка: ${xhr.loaded} байт...`;
+            },
+            (err) => {
+                status.innerText = "ОШИБКА: model.glb не найден или заблокирован!";
+                status.className = "error";
+                console.error(err);
             }
-        }
-
-        function initScene(pressGltf, lifeGltf, kostyaGltf) {
-            const src = pressGltf.scene;
-            const box = new THREE.Box3().setFromObject(src); const center = new THREE.Vector3(); box.getCenter(center); src.position.sub(center);
-            src.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-            wallLeft = new THREE.Group(); wallLeft.add(src); wallLeft.rotation.y = -Math.PI / 2; scene.add(wallLeft);
-            const clone = src.clone(true); clone.traverse(o => { if (o.isMesh && o.material) o.material = o.material.clone(); });
-            wallRight = new THREE.Group(); wallRight.add(clone); wallRight.rotation.y = Math.PI / 2; scene.add(wallRight);
-            
-            const rotatedBox = new THREE.Box3().setFromObject(wallLeft); const size = new THREE.Vector3(); rotatedBox.getSize(size); const halfWidth = size.x / 2;
-            targetX1 = -halfWidth - 0.05; targetX2 = halfWidth + 0.05; startX1 = -halfWidth - 3.5; startX2 = halfWidth + 3.5;
-            wallLeft.position.set(startX1, 0, 0); wallRight.position.set(startX2, 0, 0);
-            camera.position.set(0, 1, Math.max(size.y * 1.8, size.x * 4, 8)); controls.target.set(0, 0, 0);
-
-            kostyaModelTemplate = kostyaGltf.scene;
-            kostyaModelTemplate.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-
-            document.getElementById('loading-container').style.display = 'none';
-            document.getElementById('crush-btn').disabled = false;
-        }
-
-        startLoading(); // Запускаем процесс
-
-        // --- 5. КНОПКИ ---
-        document.getElementById('crush-btn').addEventListener('click', () => {
-            initAudio(); isCrushing = !isCrushing;
-            document.getElementById('crush-btn').innerText = isCrushing ? 'РАЗДВИНУТЬ' : 'ДАВИТЬ';
-        });
-        document.getElementById('btn-balloon').onclick = () => { initAudio(); spawnBalloon(); };
-        document.getElementById('btn-cooler').onclick = () => { initAudio(); spawnCooler(); };
-        document.getElementById('btn-custom').onclick = () => { initAudio(); spawnLife(); };
-
-        // --- 6. СПАВН ---
-        function spawnBalloon() {
-            const geo = new THREE.SphereGeometry(0.6, 32, 32); const mat = new THREE.MeshStandardMaterial({ color: 0xff2222, roughness: 0.1, metalness: 0.2 });
-            const mesh = new THREE.Mesh(geo, mat); mesh.castShadow = true; scene.add(mesh);
-            const body = new CANNON.Body({ mass: 0.1, shape: new CANNON.Sphere(0.6) }); body.position.set(0, 4, 0); world.addBody(body);
-            props.push({ mesh, body, type: 'balloon', radius: 0.6, processed: false });
-        }
-        function spawnCooler() {
-            const group = new THREE.Group();
-            group.add(new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 1.4, 16), new THREE.MeshStandardMaterial({ color: 0x00aaff, transparent: true, opacity: 0.8 })));
-            const plasticMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 1.5, 16), new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 0.4 }));
-            plasticMesh.castShadow = true; group.add(plasticMesh); scene.add(group);
-            const body = new CANNON.Body({ mass: 2.0, shape: new CANNON.Cylinder(0.5, 0.5, 1.5, 16) }); body.position.set(0, 4, 0); world.addBody(body);
-            props.push({ mesh: group, body, type: 'cooler', radius: 0.5, processed: false });
-        }
-        function spawnLife() {
-            loadWithTimeout('./life.glb').then(gltf => {
-                const model = gltf.scene;
-                const box = new THREE.Box3().setFromObject(model); const size = new THREE.Vector3(); box.getSize(size);
-                const center = new THREE.Vector3(); box.getCenter(center); model.position.sub(center);
-                const maxDim = Math.max(size.x, size.y, size.z);
-                if (maxDim > 0) { const scale = 1.2 / maxDim; model.scale.set(scale, scale, scale); size.multiplyScalar(scale); }
-                const group = new THREE.Group(); group.add(model); scene.add(group);
-                
-                const spawnY = -1.5 + size.y / 2;
-                const body = new CANNON.Body({ mass: 2.0, shape: new CANNON.Box(new CANNON.Vec3(size.x/2, size.y/2, size.z/2)) });
-                body.position.set(0, spawnY, 0);
-                body.fixedRotation = true; body.angularFactor.set(0, 0, 0); body.updateMassProperties();
-                world.addBody(body);
-                props.push({ mesh: group, body, type: 'life', originalSize: size.clone(), stage: 0 });
-            }).catch(err => { alert("ОШИБКА: life.glb не найден при спавне!"); });
-        }
-
-        // --- 7. ГИПЕРРЕАЛИСТИЧНАЯ КРОВЬ ---
-        function createBloodTexture() {
-            const canvas = document.createElement('canvas'); canvas.width = 128; canvas.height = 128;
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = 'transparent'; ctx.fillRect(0,0,128,128);
-            for(let i=0; i<15; i++) {
-                const x = 64 + (Math.random()-0.5)*60; const y = 64 + (Math.random()-0.5)*60; const r = Math.random() * 20 + 5;
-                const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
-                grad.addColorStop(0, 'rgba(120, 0, 0, 0.9)'); grad.addColorStop(1, 'rgba(80, 0, 0, 0)');
-                ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
-            }
-            const tex = new THREE.CanvasTexture(canvas); tex.colorSpace = THREE.SRGBColorSpace; return tex;
-        }
-        const bloodTexture = createBloodTexture();
-
-        function addBloodDecal(pos, normal, targetMesh) {
-            if(!targetMesh) return;
-            const decalGeo = new DecalGeometry(targetMesh, pos, new THREE.Euler(0, Math.random() * Math.PI * 2, 0), new THREE.Vector3(0.8, 0.8, 0.8));
-            const decalMat = new THREE.MeshStandardMaterial({ map: bloodTexture, transparent: true, depthTest: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4, opacity: 0.9 });
-            const decal = new THREE.Mesh(decalGeo, decalMat); scene.add(decal);
-        }
-
-        const bloodGeo = new THREE.SphereGeometry(0.05, 8, 8);
-        const bloodMat = new THREE.MeshPhysicalMaterial({ color: 0xaa0000, roughness: 0.1, metalness: 0.2, clearcoat: 1.0 });
-        const MAX_DROPS = 200;
-        const bloodDropsMesh = new THREE.InstancedMesh(bloodGeo, bloodMat, MAX_DROPS);
-        bloodDropsMesh.castShadow = true; bloodDropsMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); scene.add(bloodDropsMesh);
-        
-        let dropsData = new Array(MAX_DROPS).fill(null); 
-        let dummyMatrix = new THREE.Object3D();
-        for(let i=0; i<MAX_DROPS; i++) { dummyMatrix.scale.set(0,0,0); dummyMatrix.updateMatrix(); bloodDropsMesh.setMatrixAt(i, dummyMatrix.matrix); }
-
-        function spawnBloodSpray(pos, count = 40) {
-            let spawned = 0;
-            for (let i = 0; i < MAX_DROPS; i++) {
-                if (dropsData[i] === null || dropsData[i].life <= 0) {
-                    const vel = new THREE.Vector3((Math.random()-0.5)*12, Math.random()*15, (Math.random()-0.5)*12);
-                    dropsData[i] = { pos: pos.clone(), vel: vel, life: 1.5 + Math.random(), size: Math.random()*0.8 + 0.4 };
-                    spawned++; if (spawned >= count) break;
-                }
-            }
-        }
-
-        function updateBlood() {
-            const dt = 1/60;
-            for (let i = 0; i < MAX_DROPS; i++) {
-                const d = dropsData[i];
-                if (d && d.life > 0) {
-                    d.life -= dt; d.vel.y -= 30 * dt; d.pos.add(d.vel.clone().multiplyScalar(dt));
-                    if (d.pos.y <= -1.45) { 
-                        d.pos.y = -1.45; d.vel.set(0,0,0); 
-                        if (Math.random() < 0.05) addBloodDecal(d.pos, new THREE.Vector3(0,1,0), groundMesh);
-                    } else if (Math.abs(d.pos.x) > 1.5 && d.pos.y > -1.5 && d.pos.y < 1.5) {
-                        d.vel.set(0,0,0); d.pos.x = Math.sign(d.pos.x) * 1.5; 
-                        if (Math.random() < 0.05) addBloodDecal(d.pos, new THREE.Vector3(Math.sign(d.pos.x),0,0), Math.sign(d.pos.x)>0 ? wallRight.children[0] : wallLeft.children[0]);
-                    }
-                    dummyMatrix.position.copy(d.pos);
-                    if (d.pos.y <= -1.45) dummyMatrix.scale.set(d.size * 2, d.size * 0.1, d.size * 2);
-                    else dummyMatrix.scale.set(d.size, d.size * 1.5, d.size);
-                    dummyMatrix.updateMatrix(); bloodDropsMesh.setMatrixAt(i, dummyMatrix.matrix);
-                } else {
-                    dummyMatrix.scale.set(0,0,0); dummyMatrix.updateMatrix(); bloodDropsMesh.setMatrixAt(i, dummyMatrix.matrix);
-                }
-            }
-            bloodDropsMesh.instanceMatrix.needsUpdate = true;
-        }
-
-        // --- 8. ЛОГИКА РАЗРУШЕНИЯ ---
-        function breakLife(prop) {
-            if (prop.stage === 0) {
-                prop.stage = 1; playSquishSound(); shakeCamera(0.2);
-                spawnBloodSpray(prop.body.position, 30);
-                addBloodDecal(new THREE.Vector3(wallLeft.position.x + 1.5, 0, 0), new THREE.Vector3(1,0,0), wallLeft.children[0]);
-                addBloodDecal(new THREE.Vector3(wallRight.position.x - 1.5, 0, 0), new THREE.Vector3(-1,0,0), wallRight.children[0]);
-            } else if (prop.stage === 1) {
-                playCrunchSound(); shakeCamera(0.5);
-                const pos = prop.body.position;
-                scene.remove(prop.mesh); world.removeBody(prop.body); const idx = props.indexOf(prop); if (idx > -1) props.splice(idx, 1);
-                spawnBloodSpray(pos, 100);
-                for(let i=0; i<5; i++) { addBloodDecal(new THREE.Vector3((Math.random()-0.5)*2, -1.49, (Math.random()-0.5)*2), new THREE.Vector3(0,1,0), groundMesh); }
-                for (let i = 0; i < 15; i++) {
-                    const size = Math.random() * 0.15 + 0.05;
-                    const fragMesh = new THREE.Mesh(new THREE.SphereGeometry(size, 8, 8), new THREE.MeshPhysicalMaterial({ color: 0xbb0000, roughness: 0.4, clearcoat: 0.5 })); 
-                    fragMesh.castShadow = true; scene.add(fragMesh);
-                    const fragBody = new CANNON.Body({ mass: 0.1, shape: new CANNON.Sphere(size) }); 
-                    fragBody.position.set(pos.x + (Math.random()-0.5)*0.4, pos.y + (Math.random()-0.5)*0.4, pos.z + (Math.random()-0.5)*0.4);
-                    fragBody.velocity.set((Math.random()-0.5)*10, Math.random()*8 + 2, (Math.random()-0.5)*10); 
-                    world.addBody(fragBody);
-                    props.push({ mesh: fragMesh, body: fragBody, type: 'fragment', life: 10.0 });
-                }
-            }
-        }
-
-        // --- 9. ЦИКЛ ---
-        let frames = 0; let lastTime = performance.now();
-        function animate() {
-            requestAnimationFrame(animate);
-            const dt = Math.min(clock.getDelta(), 1/30); 
-            frames++; const now = performance.now();
-            if (now - lastTime > 1000) { document.getElementById('fps').innerText = `FPS: ${frames}`; frames = 0; lastTime = now; }
-
-            if (wallLeft && wallRight) {
-                if (isCrushing) progress = Math.min(progress + dt * SPEED, 1); else progress = Math.max(progress - dt * SPEED, 0);
-                wallLeft.position.x = THREE.MathUtils.lerp(startX1, targetX1, progress); wallRight.position.x = THREE.MathUtils.lerp(startX2, targetX2, progress);
-                const currentGap = wallRight.position.x - wallLeft.position.x; 
-                const centerGap = currentGap - (targetX2 - targetX1); 
-
-                for (let i = props.length - 1; i >= 0; i--) {
-                    const p = props[i];
-                    if (p.type === 'balloon' && !p.processed) {
-                        if (currentGap < p.radius * 2 && Math.abs(p.body.position.x) < p.radius && p.body.position.y > -1.5) {
-                            p.processed = true; playPopSound(); shakeCamera(0.2);
-                            scene.remove(p.mesh); world.removeBody(p.body); props.splice(i, 1);
-                            spawnBloodSpray(p.body.position, 30);
-                        }
-                    }
-                }
-
-                for (let i = props.length - 1; i >= 0; i--) {
-                    const p = props[i];
-                    if (p.type === 'cooler' && !p.processed) {
-                        if (currentGap < 1.2 && Math.abs(p.body.position.x) < p.radius && p.body.position.y > -1.5) {
-                            p.processed = true; playCrunchSound(); shakeCamera(0.3);
-                            scene.remove(p.mesh); world.removeBody(p.body); props.splice(i, 1);
-                            spawnBloodSpray(p.body.position, 40); 
-                        }
-                    }
-                }
-
-                if (progress >= 0.99 && isCrushing) {
-                    const lifeProp = props.find(p => p.type === 'life');
-                    if (lifeProp && !lifeProp.processed) {
-                        lifeProp.processed = true; breakLife(lifeProp);
-                        setTimeout(() => { if(lifeProp) lifeProp.processed = false; }, 500); 
-                    } else {
-                        const fragmentsExist = props.some(p => p.type === 'fragment');
-                        if (fragmentsExist && kostyaModelTemplate) {
-                            playMetalClankSound();
-                            for (let i = props.length - 1; i >= 0; i--) { 
-                                if (props[i].type === 'fragment') { scene.remove(props[i].mesh); world.removeBody(props[i].body); props.splice(i, 1); } 
-                            }
-                            const bone = SkeletonUtils.clone(kostyaModelTemplate); 
-                            const bBox = new THREE.Box3().setFromObject(bone); const bCenter = new THREE.Vector3(); bBox.getCenter(bCenter); bone.position.sub(bCenter);
-                            const bGroup = new THREE.Group(); bGroup.add(bone); scene.add(bGroup);
-                            const bBody = new CANNON.Body({ mass: 1.0, shape: new CANNON.Box(new CANNON.Vec3(0.5, 0.5, 0.5)) });
-                            bBody.position.set(0, -1.0, 0); bBody.fixedRotation = true; bBody.angularFactor.set(0, 0, 0); bBody.updateMassProperties(); world.addBody(bBody);
-                            props.push({ mesh: bGroup, body: bBody, type: 'bone' });
-                        }
-                    }
-                }
-
-                props.forEach(p => {
-                    if (p.type === 'life' && p.stage === 0) {
-                        if (Math.abs(p.body.position.x) < 1.5) {
-                            const squashFactor = THREE.MathUtils.clamp(1 - (centerGap / p.originalSize.x), 0, 1);
-                            p.mesh.scale.x = Math.max(0.2, 1 - squashFactor * 0.7); p.mesh.scale.y = 1 + squashFactor * 0.2;
-                        }
-                    }
-                });
-            }
-
-            updateBlood(); 
-            world.step(1/60, dt, 3); 
-
-            for (let i = props.length - 1; i >= 0; i--) {
-                const p = props[i]; p.mesh.position.copy(p.body.position); p.mesh.quaternion.copy(p.body.quaternion);
-                if (p.type === 'fragment') { p.life -= dt; if (p.life <= 0) { scene.remove(p.mesh); world.removeBody(p.body); props.splice(i, 1); } }
-            }
-
-            controls.update(); 
-            if (shakeTime > 0) { shakeTime -= dt; camera.position.x += (Math.random() - 0.5) * shakePower; camera.position.y += (Math.random() - 0.5) * shakePower; }
-            renderer.render(scene, camera);
-        }
-
-        let shakeTime = 0; let shakePower = 0;
-        function shakeCamera(power) { shakePower = power; shakeTime = 0.2; }
-        animate();
-
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth/window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight);
-        });
+        );
     </script>
 </body>
 </html>
