@@ -33,6 +33,13 @@
         
         #fps { position:absolute; top:80px; right:20px; color:#0f0; font-family:monospace; font-size:14px; background:rgba(0,0,0,0.6); padding:4px 8px; border-radius:5px; z-index:20; }
         #loading { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); color:#fff; font-size:18px; z-index:100; }
+        
+        /* Экран для показа ошибок загрузки */
+        #error-msg {
+            position:absolute; top:20%; left:50%; transform:translateX(-50%);
+            background:rgba(255,0,0,0.8); color:white; padding:15px; border-radius:10px;
+            font-size:14px; display:none; z-index:200; text-align:center; width:80%; pointer-events:none;
+        }
     </style>
     
     <script type="importmap">
@@ -47,6 +54,7 @@
 </head>
 <body>
     <div id="loading">Загрузка...</div>
+    <div id="error-msg">Ошибка загрузки</div>
     <div id="canvas-container"></div>
     <div id="fps">FPS: --</div>
 
@@ -61,11 +69,12 @@
     <script type="module">
         import * as THREE from 'three';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
         import * as CANNON from 'cannon-es';
 
-        // --- 1. АУДИО СИСТЕМА ---
+        // --- 1. АУДИо СИСТЕМА ---
         let audioCtx = null;
         function initAudio() {
             if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -107,7 +116,6 @@
             osc.connect(oscGain).connect(audioCtx.destination); osc.start(t); osc.stop(t + 0.3);
         }
 
-        // Звук хруста для кастомной модели
         function playCrunchSound() {
             if (!audioCtx) return;
             const t = audioCtx.currentTime;
@@ -115,7 +123,6 @@
             const buffer = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
             const data = buffer.getChannelData(0);
             for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
-            
             const noise = audioCtx.createBufferSource(); noise.buffer = buffer;
             const filter = audioCtx.createBiquadFilter(); filter.type = 'bandpass'; filter.frequency.value = 1500;
             const gain = audioCtx.createGain(); gain.gain.setValueAtTime(1, t); gain.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
@@ -276,38 +283,49 @@
             props.push({ mesh: group, body, type: 'cooler', radius: 0.5 });
         }
 
-        // ФУНКЦИЯ ЗАГРУЗКИ ВАШЕЙ МОДЕЛИ
+        // ФУНКЦИЯ ЗАГРУЗКИ ВАШЕЙ МОДЕЛИ (С поддержкой Draco)
         function spawnCustomModel() {
+            const errorDiv = document.getElementById('error-msg');
+            errorDiv.style.display = 'none'; // Скрываем старые ошибки
+
             const loader = new GLTFLoader();
-            // Загружаем life.glb (убедитесь, что файл лежит в одной папке с index.html)
+            
+            // Подключаем DRACOLoader (нужен для сжатых моделей)
+            const dracoLoader = new DRACOLoader();
+            dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+            loader.setDRACOLoader(dracoLoader);
+
+            // ВАЖНО: Имя файла чувствительно к регистру! (life.glb != Life.glb)
             loader.load('./life.glb', (gltf) => {
                 const model = gltf.scene;
 
-                // 1. Вычисляем размеры и центрируем
+                // 1. Вычисляем размеры
                 const box = new THREE.Box3().setFromObject(model);
                 const size = new THREE.Vector3(); box.getSize(size);
                 const center = new THREE.Vector3(); box.getCenter(center);
+                
+                // 2. Центрируем модель
                 model.position.sub(center);
 
-                // 2. Автомасштабирование (если модель огромная, уменьшаем до размера пресса)
+                // 3. МАСШТАБИРОВАНИЕ (принудительно приводим к размеру ~1.5 юнита)
                 const maxDim = Math.max(size.x, size.y, size.z);
-                if (maxDim > 1.5) {
-                    const scale = 1.5 / maxDim;
+                if (maxDim > 0) {
+                    const scale = 1.5 / maxDim; // Вычисляем коэффициент
                     model.scale.set(scale, scale, scale);
                     size.multiplyScalar(scale); // Обновляем размер для физики
                 }
 
                 model.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
 
-                // Оборачиваем в Group для удобного сжатия
+                // Оборачиваем в Group
                 const group = new THREE.Group();
                 group.add(model);
                 scene.add(group);
 
-                // 3. Создаем физическую коробку по размеру модели
+                // 4. Физика (коробка по новому размеру)
                 const shape = new CANNON.Box(new CANNON.Vec3(size.x/2, size.y/2, size.z/2));
                 const body = new CANNON.Body({ mass: 1.5, shape });
-                body.position.set(0, 4, 0);
+                body.position.set(0, 3.5, 0); // Опускаем чуть ниже, чтобы точно попасть в кадр
                 world.addBody(body);
 
                 props.push({ 
@@ -318,9 +336,16 @@
                     originalSize: size.clone()
                 });
 
-            }, undefined, (err) => {
+            }, 
+            (xhr) => {
+                // Прогресс загрузки (можно вывести в консоль)
+                console.log((xhr.loaded / xhr.total * 100) + '% загружено');
+            },
+            (err) => {
+                // ВЫВОДИМ ОШИБКУ НА ЭКРАН
                 console.error(err);
-                alert("Ошибка: Не удалось загрузить life.glb!\n\n1. Проверьте, что файл называется life.glb (не .gbl)\n2. Он лежит в той же папке, что и index.html");
+                errorDiv.style.display = 'block';
+                errorDiv.innerHTML = 'Не удалось загрузить life.glb<br>Проверьте:<br>1. Имя файла (строго life.glb)<br>2. Файл в той же папке<br>3. Консоль браузера';
             });
         }
 
@@ -336,7 +361,7 @@
 
             if (prop.type === 'balloon') playPopSound();
             else if (prop.type === 'cooler') playSmashSound();
-            else if (prop.type === 'custom') playCrunchSound(); // Звук для кастомной модели
+            else if (prop.type === 'custom') playCrunchSound();
 
             const numFragments = prop.type === 'cooler' ? 25 : 15;
             const color = prop.type === 'cooler' ? 0xeeeeee : (prop.type === 'custom' ? 0xcccccc : 0xff2222);
@@ -448,12 +473,10 @@
                         if (Math.abs(p.body.position.x) < 1.5 && p.body.position.y > -1.5) {
                             const squashFactor = THREE.MathUtils.clamp(1 - (centerGap / p.originalSize.x), 0, 1);
                             
-                            // Визуально сплющиваем модель (сжимаем по X, растягиваем по Y и Z)
                             p.mesh.scale.x = Math.max(0.1, 1 - squashFactor * 0.8);
                             p.mesh.scale.y = 1 + squashFactor * 0.3;
                             p.mesh.scale.z = 1 + squashFactor * 0.3;
 
-                            // Если сжали до предела - ломаем
                             if (squashFactor > 0.9) breakObject(p);
                         }
                     }
