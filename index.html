@@ -3,62 +3,57 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>PC-Grade Hydraulic Press: Hyper-Realism</title>
+    <title>Гидравлический пресс: Реализм</title>
     <style>
         body { margin:0; overflow:hidden; background:#0a0a0a; font-family:sans-serif; touch-action:none; user-select:none; }
         #canvas-container { width:100vw; height:100vh; display:block; }
-        #loading { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); color:#fff; font-size:18px; text-align:center; z-index:100; }
         
-        #error-box {
-            display:none; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
-            background:#ff4757; color:#fff; padding:20px; border-radius:10px;
-            font-size:16px; text-align:center; z-index:200; max-width:80%; word-wrap:break-word;
-        }
-
+        /* UI */
         #ui-top {
             position:absolute; top:20px; left:50%; transform:translateX(-50%);
-            display:flex; gap:10px; z-index:10; width:90%; justify-content:center; flex-wrap:wrap;
+            display:flex; gap:10px; z-index:10; width:95%; justify-content:center; flex-wrap:wrap;
         }
         .spawn-btn {
             padding:12px 20px; font-size:16px; font-weight:bold; color:#fff;
-            background:rgba(30,30,30,0.8); border:1px solid #444;
-            border-radius:8px; backdrop-filter:blur(10px); cursor:pointer;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            background:rgba(30,30,30,0.85); border:1px solid #555;
+            border-radius:12px; backdrop-filter:blur(5px); cursor:pointer;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.6);
+            transition: transform 0.1s;
         }
-        .spawn-btn:active { background:#555; }
+        .spawn-btn:active { transform: scale(0.95); background:#444; }
 
         #crush-btn {
             position:absolute; bottom:30px; left:50%; transform:translateX(-50%);
-            padding:15px 40px; font-size:20px; font-weight:bold; color:#fff;
-            background:linear-gradient(135deg, #ff4757, #c0392b); border:none; border-radius:30px;
+            padding:16px 50px; font-size:22px; font-weight:bold; color:#fff;
+            background:linear-gradient(135deg, #ff4757, #c0392b); border:none; border-radius:35px;
             box-shadow:0 6px 20px rgba(255,71,87,0.5); cursor:pointer; z-index:10;
+            transition: transform 0.1s;
         }
         #crush-btn:active { transform:translateX(-50%) scale(0.95); }
         #crush-btn:disabled { background:#333; box-shadow:none; color:#777; }
         
         #fps { position:absolute; top:80px; right:20px; color:#0f0; font-family:monospace; font-size:14px; background:rgba(0,0,0,0.6); padding:4px 8px; border-radius:5px; z-index:20; }
+        #loading { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); color:#fff; font-size:18px; z-index:100; }
     </style>
     
-    <!-- Стабильные ссылки на модули -->
     <script type="importmap">
     {
         "imports": {
             "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
             "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
-            "three-pinata": "https://esm.sh/@dgreenheck/three-pinata@2.0.1"
+            "cannon-es": "https://unpkg.com/cannon-es@0.20.0/dist/cannon-es.js"
         }
     }
     </script>
 </head>
 <body>
-    <div id="loading">Инициализация физики и рендера...</div>
-    <div id="error-box"></div>
+    <div id="loading">Загрузка...</div>
     <div id="canvas-container"></div>
     <div id="fps">FPS: --</div>
 
     <div id="ui-top">
-        <button class="spawn-btn" id="btn-balloon">🎈 Мягкий шар (Soft Body)</button>
-        <button class="spawn-btn" id="btn-cooler">🥤 Кулер (Voronoi Shatter)</button>
+        <button class="spawn-btn" id="btn-balloon">🎈 Шарик</button>
+        <button class="spawn-btn" id="btn-cooler">🥤 Кулер</button>
     </div>
 
     <button id="crush-btn" disabled>ДАВИТЬ</button>
@@ -68,280 +63,289 @@
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-        import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
-        import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
-        import * as PINATA from 'three-pinata';
+        import * as CANNON from 'cannon-es';
 
         // --- 1. Рендерер и Сцена ---
-        const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Ограничиваем для мобилок
         renderer.outputColorSpace = THREE.SRGBColorSpace;
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        renderer.toneMappingExposure = 1.2;
         renderer.shadowMap.enabled = true;
-        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.shadowMap.type = THREE.PCFShadowMap; // Легкие тени
         document.getElementById('canvas-container').appendChild(renderer.domElement);
 
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x050505);
-        scene.fog = new THREE.FogExp2(0x050505, 0.02);
-
+        scene.background = new THREE.Color(0x141414);
+        
+        // Красивые отражения для металла
         const pmrem = new THREE.PMREMGenerator(renderer);
         scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
-        const camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 0.1, 1000);
+        const camera = new THREE.PerspectiveCamera(50, window.innerWidth/window.innerHeight, 0.1, 100);
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
-        controls.dampingFactor = 0.05;
 
-        // --- 2. Постобработка (PC-Style) ---
-        const composer = new EffectComposer(renderer);
-        composer.addPass(new RenderPass(scene, camera));
+        // --- 2. Свет (Оптимизированный) ---
+        scene.add(new THREE.HemisphereLight(0xffffff, 0x333333, 1.0));
         
-        const ssaoPass = new SSAOPass(scene, camera, window.innerWidth, window.innerHeight);
-        ssaoPass.kernelRadius = 16;
-        composer.addPass(ssaoPass);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 2.0);
+        dirLight.position.set(5, 10, 7);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 1024;
+        dirLight.shadow.mapSize.height = 1024;
+        dirLight.shadow.bias = -0.001;
+        // Настраиваем камеру теней под наши размеры
+        dirLight.shadow.camera.left = -10;
+        dirLight.shadow.camera.right = 10;
+        dirLight.shadow.camera.top = 10;
+        dirLight.shadow.camera.bottom = -10;
+        scene.add(dirLight);
 
-        const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.6, 0.4, 0.85);
-        composer.addPass(bloomPass);
+        // --- 3. Физический мир (Cannon-es) ---
+        const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -20, 0) });
+        world.allowSleep = true; // Объекты "засыпают", экономя ресурсы
 
-        const bokehPass = new BokehPass(scene, camera, { focus: 10.0, aperture: 0.0001, maxblur: 0.01 });
-        composer.addPass(bokehPass);
+        // Пол
+        const groundBody = new CANNON.Body({ mass: 0, shape: new CANNON.Plane() });
+        groundBody.quaternion.setFromEuler(-Math.PI/2, 0, 0);
+        groundBody.position.y = -1.5;
+        world.addBody(groundBody);
 
-        // --- 3. Свет ---
-        scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-        
-        const keyLight = new THREE.DirectionalLight(0xffeedd, 3.0);
-        keyLight.position.set(5, 10, 7);
-        keyLight.castShadow = true;
-        keyLight.shadow.mapSize.width = 2048;
-        keyLight.shadow.mapSize.height = 2048;
-        keyLight.shadow.bias = -0.0005;
-        scene.add(keyLight);
-
-        const rimLight = new THREE.DirectionalLight(0x4488ff, 1.5);
-        rimLight.position.set(-5, 5, -7);
-        scene.add(rimLight);
-
-        // --- 4. Инициализация Ammo.js (надежный способ) ---
-        let physicsWorld;
-        let softBodySolver;
-        const clock = new THREE.Clock();
-        const props = [];
-        let ammoReady = false;
-
-        async function initPhysics() {
-            try {
-                // Загружаем Ammo.js как обычный скрипт
-                await new Promise((resolve, reject) => {
-                    const script = document.createElement('script');
-                    // Используем проверенный CDN с явной версией
-                    script.src = 'https://cdn.jsdelivr.net/gh/kripken/ammo.js@79190a1f03845794b1bba1777f30037349967658/builds/ammo.wasm.js';
-                    script.onload = resolve;
-                    script.onerror = () => reject(new Error('Не удалось загрузить ammo.wasm.js'));
-                    document.head.appendChild(script);
-                });
-
-                // Ждем, пока Ammo станет доступен и инициализируется
-                if (typeof Ammo === 'undefined') {
-                    throw new Error('Переменная Ammo не определена после загрузки скрипта.');
-                }
-
-                const AmmoLib = await Ammo();
-                
-                const collisionConfiguration = new AmmoLib.btSoftBodyRigidBodyCollisionConfiguration();
-                const dispatcher = new AmmoLib.btCollisionDispatcher(collisionConfiguration);
-                const broadphase = new AmmoLib.btDbvtBroadphase();
-                const solver = new AmmoLib.btSequentialImpulseConstraintSolver();
-                softBodySolver = new AmmoLib.btDefaultSoftBodySolver();
-                
-                physicsWorld = new AmmoLib.btSoftRigidDynamicsWorld(dispatcher, broadphase, solver, collisionConfiguration, softBodySolver);
-                physicsWorld.setGravity(new AmmoLib.btVector3(0, -20, 0));
-                
-                const groundShape = new AmmoLib.btBoxShape(new AmmoLib.btVector3(50, 0.5, 50));
-                const groundBody = new AmmoLib.btRigidBody(new AmmoLib.btRigidBodyConstructionInfo(0, null, groundShape));
-                groundBody.setWorldTransform(new AmmoLib.btTransform(new AmmoLib.btQuaternion(0,0,0,1), new AmmoLib.btVector3(0, -1.5, 0)));
-                physicsWorld.addRigidBody(groundBody);
-
-                ammoReady = true;
-                document.getElementById('loading').style.display = 'none';
-                document.getElementById('crush-btn').disabled = false;
-                initPress();
-
-            } catch (err) {
-                console.error("Ошибка инициализации физики:", err);
-                // Показываем ошибку на экране
-                const box = document.getElementById('error-box');
-                box.style.display = 'block';
-                box.innerText = 'ОШИБКА ФИЗИКИ: ' + err.message;
-                document.getElementById('loading').style.display = 'none';
-            }
-        }
-        initPhysics();
-
-        // Визуальный пол
         const groundMesh = new THREE.Mesh(
             new THREE.PlaneGeometry(100, 100),
-            new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.8, metalness: 0.2 })
+            new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.9, metalness: 0.1 })
         );
         groundMesh.rotation.x = -Math.PI/2;
         groundMesh.position.y = -1.5;
         groundMesh.receiveShadow = true;
         scene.add(groundMesh);
 
-        // --- 5. Загрузка пресса ---
+        // --- 4. Переменные пресса ---
         let wallLeft, wallRight;
         let isCrushing = false;
         let progress = 0;
-        const SPEED = 3.0;
+        const SPEED = 6.0; // Очень быстро, как настоящий пресс
         let startX1, startX2, targetX1, targetX2;
+        
+        const props = []; // Массив для всех объектов
+        const clock = new THREE.Clock();
 
-        function initPress() {
-            new GLTFLoader().load('./model.glb', (gltf) => {
-                const src = gltf.scene;
-                const box = new THREE.Box3().setFromObject(src);
-                const center = new THREE.Vector3(); box.getCenter(center);
-                src.position.sub(center);
+        // --- 5. Загрузка пресса ---
+        new GLTFLoader().load('./model.glb', (gltf) => {
+            const src = gltf.scene;
+            
+            // Центрируем модель
+            const box = new THREE.Box3().setFromObject(src);
+            const center = new THREE.Vector3(); box.getCenter(center);
+            src.position.sub(center);
 
-                src.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; if (o.material) o.material.side = THREE.DoubleSide; } });
-
-                wallLeft = new THREE.Group(); wallLeft.add(src); wallLeft.rotation.y = -Math.PI/2; scene.add(wallLeft);
-                const clone = src.clone(true); clone.traverse(o => { if (o.isMesh && o.material) o.material = o.material.clone(); });
-                wallRight = new THREE.Group(); wallRight.add(clone); wallRight.rotation.y = Math.PI/2; scene.add(wallRight);
-
-                const rotatedBox = new THREE.Box3().setFromObject(wallLeft);
-                const size = new THREE.Vector3(); rotatedBox.getSize(size);
-                const halfWidth = size.x / 2;
-
-                targetX1 = -halfWidth - 0.01; targetX2 = halfWidth + 0.01;
-                startX1 = -halfWidth - 4.0; startX2 = halfWidth + 4.0;
-
-                wallLeft.position.set(startX1, 0, 0); wallRight.position.set(startX2, 0, 0);
-
-                const camDist = Math.max(size.y * 1.8, size.x * 4, 10);
-                camera.position.set(0, 2, camDist); controls.target.set(0, 0, 0);
-            }, undefined, (err) => {
-                console.error("Ошибка загрузки модели:", err);
-                document.getElementById('error-box').style.display = 'block';
-                document.getElementById('error-box').innerText = 'ОШИБКА: не удалось загрузить model.glb';
+            src.traverse(o => { 
+                if (o.isMesh) { 
+                    o.castShadow = true; 
+                    o.receiveShadow = true; 
+                    // НЕ ИСПОЛЬЗУЕМ DoubleSide, чтобы не ломать освещение!
+                } 
             });
-        }
 
-        // --- 6. Спавн объектов ---
-        document.getElementById('btn-balloon').onclick = () => spawnSoftBalloon();
-        document.getElementById('btn-cooler').onclick = () => spawnFracturableCooler();
+            // Левая стена (ваши координаты поворота)
+            wallLeft = new THREE.Group(); 
+            wallLeft.add(src); 
+            wallLeft.rotation.y = -Math.PI / 2; 
+            scene.add(wallLeft);
 
-        function spawnSoftBalloon() {
-            if (!ammoReady) return;
-            
-            const geo = new THREE.SphereGeometry(0.6, 32, 32);
-            const mat = new THREE.MeshPhysicalMaterial({ 
-                color: 0xff2222, roughness: 0.1, metalness: 0.0, clearcoat: 1.0, transmission: 0.2 
-            });
-            const mesh = new THREE.Mesh(geo, mat);
-            mesh.castShadow = true; mesh.receiveShadow = true;
-            scene.add(mesh);
+            // Правая стена
+            const clone = src.clone(true); 
+            clone.traverse(o => { if (o.isMesh && o.material) o.material = o.material.clone(); });
+            wallRight = new THREE.Group(); 
+            wallRight.add(clone); 
+            wallRight.rotation.y = Math.PI / 2; 
+            scene.add(wallRight);
 
-            const softBodyHelpers = new Ammo.btSoftBodyHelpers();
-            const center = new Ammo.btVector3(0, 5, 0);
-            const radius = new Ammo.btVector3(0.6, 0.6, 0.6);
-            const softBody = softBodyHelpers.CreateEllipsoid(physicsWorld.getWorldInfo(), center, radius, 128);
-            
-            const config = softBody.get_m_cfg();
-            config.set_kPR(15.0);
-            config.set_kDP(0.01);
-            config.set_kDF(0.2);
-            
-            const material = softBody.getMaterial(0);
-            material.set_m_kLST(0.1);
-            material.set_m_kAST(0.1);
-            
-            softBody.setTotalMass(1.0, false);
-            physicsWorld.addSoftBody(softBody, 1, -1);
+            // Вычисляем точное расстояние для схлопывания
+            const rotatedBox = new THREE.Box3().setFromObject(wallLeft);
+            const size = new THREE.Vector3(); rotatedBox.getSize(size);
+            const halfWidth = size.x / 2;
 
-            props.push({ mesh, type: 'soft', body: softBody, isSoft: true });
-        }
+            targetX1 = -halfWidth - 0.05; targetX2 = halfWidth + 0.05;
+            startX1 = -halfWidth - 3.5; startX2 = halfWidth + 3.5;
 
-        function spawnFracturableCooler() {
-            if (!ammoReady) return;
+            wallLeft.position.set(startX1, 0, 0); 
+            wallRight.position.set(startX2, 0, 0);
 
-            const geo = new THREE.CylinderGeometry(0.5, 0.5, 1.5, 32);
-            const mat = new THREE.MeshStandardMaterial({ color: 0x00aaff, roughness: 0.2, metalness: 0.5 });
-            
-            const destructible = new PINATA.DestructibleMesh(geo, mat, new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 }));
-            destructible.castShadow = true; destructible.receiveShadow = true;
-            destructible.position.set(0, 5, 0);
-            scene.add(destructible);
+            // Камера
+            const camDist = Math.max(size.y * 1.8, size.x * 4, 8);
+            camera.position.set(0, 1, camDist); 
+            controls.target.set(0, 0, 0);
 
-            props.push({ mesh: destructible, type: 'cooler', isDestructible: true });
-        }
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('crush-btn').disabled = false;
+        });
 
-        // --- 7. Логика пресса и разрушения ---
+        // --- 6. Кнопка Давить ---
         document.getElementById('crush-btn').addEventListener('click', () => {
             isCrushing = !isCrushing;
             document.getElementById('crush-btn').innerText = isCrushing ? 'РАЗДВИНУТЬ' : 'ДАВИТЬ';
         });
 
-        function triggerDestruction(prop, pos) {
-            if (prop.isDestructible) {
-                const options = new PINATA.FractureOptions({
-                    fractureMethod: "voronoi",
-                    fragmentCount: 40,
-                    voronoiOptions: { mode: "3D" }
-                });
-                
-                const fragments = prop.mesh.fracture(options, (fragment) => {
-                    scene.add(fragment);
-                    fragment.userData.velocity = new THREE.Vector3(
-                        (Math.random() - 0.5) * 15,
-                        Math.random() * 15,
-                        (Math.random() - 0.5) * 15
-                    );
-                    fragment.userData.life = 2.0;
-                });
-                scene.remove(prop.mesh);
-                
-                fragments.forEach(frag => props.push({ mesh: frag, type: 'fragment', isFragment: true }));
-            } 
+        // --- 7. СПАВН ОБЪЕКТОВ ---
+        document.getElementById('btn-balloon').onclick = () => spawnBalloon();
+        document.getElementById('btn-cooler').onclick = () => spawnCooler();
+
+        // Функция создания воздушного шарика (с шейдером сжатия)
+        function spawnBalloon() {
+            const geo = new THREE.SphereGeometry(0.6, 32, 32);
             
-            const idx = props.indexOf(prop);
-            if (idx > -1) props.splice(idx, 1);
-            
-            createSparks(pos);
+            // Наш хитрый материал для сжатия
+            const mat = new THREE.MeshStandardMaterial({ 
+                color: 0xff2222, 
+                roughness: 0.1, 
+                metalness: 0.2 
+            });
+
+            // Внедряем шейдер деформации
+            mat.onBeforeCompile = (shader) => {
+                shader.uniforms.uSquash = { value: 0.0 }; // 0 - норма, 1 - сплющен
+                shader.vertexShader = `uniform float uSquash;\n${shader.vertexShader}`.replace(
+                    '#include <begin_vertex>',
+                    `#include <begin_vertex>
+                    // Сжимаем по X и растягиваем по Y/Z, сохраняя объем (как резина)
+                    float squash = 1.0 - uSquash * 0.8;
+                    float stretch = 1.0 + uSquash * 0.4;
+                    transformed.x *= squash;
+                    transformed.y *= stretch;
+                    transformed.z *= stretch;
+                    `
+                );
+                mat.userData.shader = shader;
+            };
+
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            scene.add(mesh);
+
+            // Физика (обычный жесткий шар)
+            const body = new CANNON.Body({ mass: 0.1, shape: new CANNON.Sphere(0.6) });
+            body.position.set(0, 4, 0);
+            body.angularVelocity.set(Math.random(), Math.random(), Math.random());
+            world.addBody(body);
+
+            props.push({ mesh, body, type: 'balloon', radius: 0.6 });
         }
 
-        function createSparks(pos) {
-            const particleGeo = new THREE.BufferGeometry();
-            const count = 100;
+        // Функция создания кулера
+        function spawnCooler() {
+            const group = new THREE.Group();
+            
+            // Визуал
+            const waterMat = new THREE.MeshStandardMaterial({ color: 0x00aaff, transparent: true, opacity: 0.8, roughness: 0.1 });
+            const waterMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 1.4, 16), waterMat);
+            group.add(waterMesh);
+
+            const plasticMat = new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 0.4, metalness: 0.1 });
+            const plasticMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 1.5, 16), plasticMat);
+            plasticMesh.castShadow = true;
+            group.add(plasticMesh);
+            
+            scene.add(group);
+
+            // Физика (цилиндр)
+            const shape = new CANNON.Cylinder(0.5, 0.5, 1.5, 16);
+            const body = new CANNON.Body({ mass: 2.0, shape });
+            // В Cannon цилиндр лежит на боку по умолчанию, поворачиваем
+            const quat = new CANNON.Quaternion();
+            quat.setFromEuler(Math.PI / 2, 0, 0);
+            body.addShape(shape, new CANNON.Vec3(), quat);
+            
+            body.position.set(0, 4, 0);
+            world.addBody(body);
+
+            props.push({ mesh: group, body, type: 'cooler', radius: 0.5 });
+        }
+
+        // --- 8. ЛОГИКА РАЗРУШЕНИЯ ---
+        function breakObject(prop) {
+            const pos = prop.body.position;
+            
+            // Удаляем старый объект
+            scene.remove(prop.mesh);
+            world.removeBody(prop.body);
+            const idx = props.indexOf(prop);
+            if (idx > -1) props.splice(idx, 1);
+
+            // Тряска камеры
+            shakeCamera(prop.type === 'cooler' ? 0.4 : 0.2);
+
+            // Создаем осколки (Визуальный Voronoi)
+            const numFragments = prop.type === 'cooler' ? 25 : 15;
+            const color = prop.type === 'cooler' ? 0xeeeeee : 0xff2222;
+            
+            for (let i = 0; i < numFragments; i++) {
+                // Маленькие кубики/пирамидки вместо сложной геометрии
+                const size = Math.random() * 0.15 + 0.05;
+                const fragGeo = new THREE.BoxGeometry(size, size, size);
+                const fragMat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.5 });
+                const fragMesh = new THREE.Mesh(fragGeo, fragMat);
+                fragMesh.castShadow = true;
+                scene.add(fragMesh);
+
+                // Физика осколка
+                const fragBody = new CANNON.Body({ mass: 0.05, shape: new CANNON.Box(new CANNON.Vec3(size/2, size/2, size/2)) });
+                fragBody.position.set(pos.x + (Math.random()-0.5)*0.5, pos.y + (Math.random()-0.5)*0.5, pos.z + (Math.random()-0.5)*0.5);
+                
+                // Взрывная сила
+                fragBody.velocity.set((Math.random()-0.5)*15, Math.random()*10 + 5, (Math.random()-0.5)*15);
+                fragBody.angularVelocity.set(Math.random()*20, Math.random()*20, Math.random()*20);
+                world.addBody(fragBody);
+
+                props.push({ mesh: fragMesh, body: fragBody, type: 'fragment', life: 3.0 });
+            }
+
+            // Брызги (только визуал)
+            createSplash(pos, prop.type === 'cooler' ? 0x00aaff : 0xffffff);
+        }
+
+        function createSplash(pos, color) {
+            const count = 50;
+            const geo = new THREE.BufferGeometry();
             const positions = new Float32Array(count * 3);
+            const velocities = [];
             for(let i=0; i<count; i++) {
                 positions[i*3] = pos.x; positions[i*3+1] = pos.y; positions[i*3+2] = pos.z;
+                velocities.push(new THREE.Vector3((Math.random()-0.5)*10, Math.random()*10, (Math.random()-0.5)*10));
             }
-            particleGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-            const particleMat = new THREE.PointsMaterial({ color: 0xffaa00, size: 0.1, blending: THREE.AdditiveBlending, transparent: true });
-            const particles = new THREE.Points(particleGeo, particleMat);
+            geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            const mat = new THREE.PointsMaterial({ color: color, size: 0.1, transparent: true, opacity: 1, depthWrite: false });
+            const particles = new THREE.Points(geo, mat);
             scene.add(particles);
             
             let life = 0;
-            const animateSparks = () => {
-                life += 0.05;
-                const posArray = particleGeo.attributes.position.array;
+            const tick = () => {
+                life += 0.02;
+                const arr = geo.attributes.position.array;
                 for(let i=0; i<count; i++) {
-                    posArray[i*3+1] -= 0.1;
+                    velocities[i].y -= 20 * 0.02;
+                    arr[i*3] += velocities[i].x * 0.02;
+                    arr[i*3+1] += velocities[i].y * 0.02;
+                    arr[i*3+2] += velocities[i].z * 0.02;
                 }
-                particleGeo.attributes.position.needsUpdate = true;
-                particleMat.opacity = 1 - life;
-                if(life < 1) requestAnimationFrame(animateSparks);
-                else { scene.remove(particles); particleGeo.dispose(); particleMat.dispose(); }
+                geo.attributes.position.needsUpdate = true;
+                mat.opacity = 1 - life;
+                if(life < 1) requestAnimationFrame(tick);
+                else { scene.remove(particles); geo.dispose(); mat.dispose(); }
             };
-            animateSparks();
+            tick();
         }
 
-        // --- 8. Главный цикл ---
+        let shakeTime = 0;
+        let shakePower = 0;
+        function shakeCamera(power) {
+            shakePower = power;
+            shakeTime = 0.2;
+        }
+
+        // --- 9. ГЛАВНЫЙ ЦИКЛ ---
         let frames = 0;
         let lastTime = performance.now();
 
@@ -349,6 +353,7 @@
             requestAnimationFrame(animate);
             const dt = Math.min(clock.getDelta(), 0.05);
 
+            // FPS
             frames++;
             const now = performance.now();
             if (now - lastTime > 1000) {
@@ -356,69 +361,79 @@
                 frames = 0; lastTime = now;
             }
 
+            // 1. Движение стен
             if (wallLeft && wallRight) {
                 if (isCrushing) progress = Math.min(progress + dt * SPEED, 1);
                 else progress = Math.max(progress - dt * SPEED, 0);
 
                 wallLeft.position.x = THREE.MathUtils.lerp(startX1, targetX1, progress);
                 wallRight.position.x = THREE.MathUtils.lerp(startX2, targetX2, progress);
+                
+                const currentGap = wallRight.position.x - wallLeft.position.x;
+                const centerGap = currentGap - (targetX2 - targetX1); // Насколько сжали
 
-                const gap = wallRight.position.x - wallLeft.position.x;
+                // 2. Взаимодействие с объектами
                 for (let i = props.length - 1; i >= 0; i--) {
                     const p = props[i];
-                    if (p.isSoft && p.mesh.position.y > -1.5 && gap < 1.5) {
-                        // Мягкое тело сжимается физикой Ammo
+                    
+                    // Сдавливание шарика
+                    if (p.type === 'balloon') {
+                        // Если шарик находится между стенами
+                        if (Math.abs(p.body.position.x) < 1.0 && p.body.position.y > -1.5) {
+                            // Считаем коэффициент сжатия (0 - свободен, 1 - полностью сжат)
+                            const availableSpace = centerGap;
+                            const squashFactor = THREE.MathUtils.clamp(1 - (availableSpace / (p.radius * 2)), 0, 1);
+                            
+                            // Применяем к шейдеру
+                            if (p.mesh.material.userData.shader) {
+                                p.mesh.material.userData.shader.uniforms.uSquash.value = squashFactor;
+                            }
+
+                            // Если сжали слишком сильно (превышен предел прочности)
+                            if (squashFactor > 0.95) {
+                                breakObject(p);
+                            }
+                        }
                     }
-                    if (p.isDestructible && gap < 1.2 && Math.abs(p.mesh.position.x) < 0.6) {
-                        triggerDestruction(p, p.mesh.position);
+
+                    // Разрушение кулера (жесткий)
+                    if (p.type === 'cooler') {
+                        if (currentGap < 1.2 && Math.abs(p.body.position.x) < p.radius) {
+                            breakObject(p);
+                        }
                     }
                 }
             }
 
-            if (ammoReady) {
-                physicsWorld.stepSimulation(dt, 10);
-                
-                props.forEach(p => {
-                    if (p.isSoft) {
-                        const softBody = p.body;
-                        const nodes = softBody.get_m_nodes();
-                        const numNodes = nodes.size();
-                        const positions = p.mesh.geometry.attributes.position.array;
-                        
-                        for (let i = 0; i < Math.min(numNodes, positions.length / 3); i++) {
-                            const node = nodes.at(i);
-                            const pos = node.get_m_x();
-                            positions[i*3] = pos.x();
-                            positions[i*3+1] = pos.y();
-                            positions[i*3+2] = pos.z();
-                        }
-                        p.mesh.geometry.attributes.position.needsUpdate = true;
-                        p.mesh.geometry.computeVertexNormals();
-                    }
-                });
-            }
+            // 3. Шаг физики
+            world.step(1/60, dt, 3);
 
+            // 4. Синхронизация мешей и физики
             for (let i = props.length - 1; i >= 0; i--) {
                 const p = props[i];
-                if (p.isFragment) {
-                    p.mesh.position.add(p.mesh.userData.velocity.clone().multiplyScalar(dt));
-                    p.mesh.userData.velocity.y -= 20 * dt;
-                    p.mesh.rotation.x += dt * 5;
-                    p.mesh.rotation.y += dt * 3;
-                    p.mesh.userData.life -= dt;
-                    if (p.mesh.userData.life <= 0) {
+                p.mesh.position.copy(p.body.position);
+                p.mesh.quaternion.copy(p.body.quaternion);
+
+                // Жизненный цикл осколков
+                if (p.type === 'fragment') {
+                    p.life -= dt;
+                    if (p.life <= 0) {
                         scene.remove(p.mesh);
+                        world.removeBody(p.body);
                         props.splice(i, 1);
                     }
                 }
             }
 
-            if (bokehPass) {
-                bokehPass.uniforms['focus'].value = camera.position.distanceTo(new THREE.Vector3(0, 0, 0));
+            // 5. Тряска камеры
+            if (shakeTime > 0) {
+                shakeTime -= dt;
+                camera.position.x += (Math.random() - 0.5) * shakePower;
+                camera.position.y += (Math.random() - 0.5) * shakePower;
             }
 
             controls.update();
-            composer.render();
+            renderer.render(scene, camera);
         }
 
         animate();
@@ -427,7 +442,6 @@
             camera.aspect = window.innerWidth/window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
-            composer.setSize(window.innerWidth, window.innerHeight);
         });
     </script>
 </body>
