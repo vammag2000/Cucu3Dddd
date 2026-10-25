@@ -9,6 +9,12 @@
         #canvas-container { width:100vw; height:100vh; display:block; }
         #loading { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); color:#fff; font-size:18px; text-align:center; z-index:100; }
         
+        #error-box {
+            display:none; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+            background:#ff4757; color:#fff; padding:20px; border-radius:10px;
+            font-size:16px; text-align:center; z-index:200; max-width:80%; word-wrap:break-word;
+        }
+
         #ui-top {
             position:absolute; top:20px; left:50%; transform:translateX(-50%);
             display:flex; gap:10px; z-index:10; width:90%; justify-content:center; flex-wrap:wrap;
@@ -33,20 +39,23 @@
         #fps { position:absolute; top:80px; right:20px; color:#0f0; font-family:monospace; font-size:14px; background:rgba(0,0,0,0.6); padding:4px 8px; border-radius:5px; z-index:20; }
     </style>
     
-    <!-- Стабильные ссылки на модули -->
+    <!-- 1. Загружаем Ammo.js как обычный скрипт (глобальная переменная) -->
+    <script src="https://cdn.jsdelivr.net/npm/ammo.js@0.0.10/builds/ammo.wasm.js"></script>
+
+    <!-- 2. Подключаем Three.js и остальные модули через importmap -->
     <script type="importmap">
     {
         "imports": {
             "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
             "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
-            "ammo": "https://cdn.jsdelivr.net/npm/@fred3d/ammo@1.0.0/dist/ammo.esm.js",
-            "three-pinata": "https://cdn.jsdelivr.net/npm/@dgreenheck/three-pinata@2.0.1/dist/three-pinata.esm.js"
+            "three-pinata": "https://esm.sh/@dgreenheck/three-pinata@2.0.1"
         }
     }
     </script>
 </head>
 <body>
     <div id="loading">Инициализация физики и рендера...</div>
+    <div id="error-box"></div>
     <div id="canvas-container"></div>
     <div id="fps">FPS: --</div>
 
@@ -67,10 +76,15 @@
         import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
         import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
         import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
-        
-        // Импорты исправленных библиотек
-        import { Ammo } from 'ammo';
-        import { DestructibleMesh, FractureOptions } from 'three-pinata';
+        import * as PINATA from 'three-pinata';
+
+        // Показываем ошибку на экране, если что-то пойдет не так
+        function showError(msg) {
+            const box = document.getElementById('error-box');
+            box.style.display = 'block';
+            box.innerText = 'ОШИБКА: ' + msg;
+            document.getElementById('loading').style.display = 'none';
+        }
 
         // --- 1. Рендерер и Сцена ---
         const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
@@ -124,41 +138,46 @@
         rimLight.position.set(-5, 5, -7);
         scene.add(rimLight);
 
-        // --- 4. Инициализация Ammo.js (с защитой от ошибок) ---
+        // --- 4. Инициализация Ammo.js (теперь через глобальную переменную) ---
         let physicsWorld;
         let softBodySolver;
         const clock = new THREE.Clock();
         const props = [];
         let ammoReady = false;
 
-        async function initPhysics() {
-            try {
-                const AmmoLib = await Ammo();
-                const collisionConfiguration = new AmmoLib.btSoftBodyRigidBodyCollisionConfiguration();
-                const dispatcher = new AmmoLib.btCollisionDispatcher(collisionConfiguration);
-                const broadphase = new AmmoLib.btDbvtBroadphase();
-                const solver = new AmmoLib.btSequentialImpulseConstraintSolver();
-                softBodySolver = new AmmoLib.btDefaultSoftBodySolver();
-                
-                physicsWorld = new AmmoLib.btSoftRigidDynamicsWorld(dispatcher, broadphase, solver, collisionConfiguration, softBodySolver);
-                physicsWorld.setGravity(new AmmoLib.btVector3(0, -20, 0));
-                
-                // Пол в физике
-                const groundShape = new AmmoLib.btBoxShape(new AmmoLib.btVector3(50, 0.5, 50));
-                const groundBody = new AmmoLib.btRigidBody(new AmmoLib.btRigidBodyConstructionInfo(0, null, groundShape));
-                groundBody.setWorldTransform(new AmmoLib.btTransform(new AmmoLib.btQuaternion(0,0,0,1), new AmmoLib.btVector3(0, -1.5, 0)));
-                physicsWorld.addRigidBody(groundBody);
+        // Ждем, пока Ammo.js загрузится (он уже подключен в <head>)
+        if (typeof Ammo === 'undefined') {
+            showError('Не удалось загрузить Ammo.js. Проверьте интернет.');
+        } else {
+            Ammo().then((AmmoLib) => {
+                try {
+                    const collisionConfiguration = new AmmoLib.btSoftBodyRigidBodyCollisionConfiguration();
+                    const dispatcher = new AmmoLib.btCollisionDispatcher(collisionConfiguration);
+                    const broadphase = new AmmoLib.btDbvtBroadphase();
+                    const solver = new AmmoLib.btSequentialImpulseConstraintSolver();
+                    softBodySolver = new AmmoLib.btDefaultSoftBodySolver();
+                    
+                    physicsWorld = new AmmoLib.btSoftRigidDynamicsWorld(dispatcher, broadphase, solver, collisionConfiguration, softBodySolver);
+                    physicsWorld.setGravity(new AmmoLib.btVector3(0, -20, 0));
+                    
+                    // Пол в физике
+                    const groundShape = new AmmoLib.btBoxShape(new AmmoLib.btVector3(50, 0.5, 50));
+                    const groundBody = new AmmoLib.btRigidBody(new AmmoLib.btRigidBodyConstructionInfo(0, null, groundShape));
+                    groundBody.setWorldTransform(new AmmoLib.btTransform(new AmmoLib.btQuaternion(0,0,0,1), new AmmoLib.btVector3(0, -1.5, 0)));
+                    physicsWorld.addRigidBody(groundBody);
 
-                ammoReady = true;
-                document.getElementById('loading').style.display = 'none';
-                document.getElementById('crush-btn').disabled = false;
-                initPress();
-            } catch (err) {
-                console.error("Ошибка инициализации Ammo.js:", err);
-                document.getElementById('loading').innerText = 'Ошибка физики! Проверьте консоль.';
-            }
+                    ammoReady = true;
+                    document.getElementById('loading').style.display = 'none';
+                    document.getElementById('crush-btn').disabled = false;
+                    initPress();
+                } catch (err) {
+                    console.error(err);
+                    showError('Ошибка настройки физического мира: ' + err.message);
+                }
+            }).catch(err => {
+                showError('Ошибка инициализации Ammo: ' + err.message);
+            });
         }
-        initPhysics();
 
         // Визуальный пол
         const groundMesh = new THREE.Mesh(
@@ -201,6 +220,8 @@
 
                 const camDist = Math.max(size.y * 1.8, size.x * 4, 10);
                 camera.position.set(0, 2, camDist); controls.target.set(0, 0, 0);
+            }, undefined, (err) => {
+                showError('Не удалось загрузить model.glb. Проверьте, что файл лежит рядом с index.html.');
             });
         }
 
@@ -211,7 +232,6 @@
         function spawnSoftBalloon() {
             if (!ammoReady) return;
             
-            // Визуал
             const geo = new THREE.SphereGeometry(0.6, 32, 32);
             const mat = new THREE.MeshPhysicalMaterial({ 
                 color: 0xff2222, roughness: 0.1, metalness: 0.0, clearcoat: 1.0, transmission: 0.2 
@@ -220,22 +240,19 @@
             mesh.castShadow = true; mesh.receiveShadow = true;
             scene.add(mesh);
 
-            // Физика Soft Body (Ammo.js)
             const softBodyHelpers = new Ammo.btSoftBodyHelpers();
             const center = new Ammo.btVector3(0, 5, 0);
             const radius = new Ammo.btVector3(0.6, 0.6, 0.6);
             const softBody = softBodyHelpers.CreateEllipsoid(physicsWorld.getWorldInfo(), center, radius, 128);
             
-            // Настройка давления (чтобы шарик не сдувался)
             const config = softBody.get_m_cfg();
-            config.set_kPR(15.0); // Внутреннее давление
-            config.set_kDP(0.01); // Демпфирование
-            config.set_kDF(0.2);  // Трение
+            config.set_kPR(15.0);
+            config.set_kDP(0.01);
+            config.set_kDF(0.2);
             
-            // Жесткость
             const material = softBody.getMaterial(0);
-            material.set_m_kLST(0.1); // Линейная
-            material.set_m_kAST(0.1); // Угловая
+            material.set_m_kLST(0.1);
+            material.set_m_kAST(0.1);
             
             softBody.setTotalMass(1.0, false);
             physicsWorld.addSoftBody(softBody, 1, -1);
@@ -249,8 +266,8 @@
             const geo = new THREE.CylinderGeometry(0.5, 0.5, 1.5, 32);
             const mat = new THREE.MeshStandardMaterial({ color: 0x00aaff, roughness: 0.2, metalness: 0.5 });
             
-            // Создаем DestructibleMesh из three-pinata
-            const destructible = new DestructibleMesh(geo, mat, new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 }));
+            // Используем PINATA (импортированный как пространство имен)
+            const destructible = new PINATA.DestructibleMesh(geo, mat, new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 }));
             destructible.castShadow = true; destructible.receiveShadow = true;
             destructible.position.set(0, 5, 0);
             scene.add(destructible);
@@ -266,8 +283,7 @@
 
         function triggerDestruction(prop, pos) {
             if (prop.isDestructible) {
-                // three-pinata: разбиваем на осколки
-                const options = new FractureOptions({
+                const options = new PINATA.FractureOptions({
                     fractureMethod: "voronoi",
                     fragmentCount: 40,
                     voronoiOptions: { mode: "3D" }
@@ -275,7 +291,6 @@
                 
                 const fragments = prop.mesh.fracture(options, (fragment) => {
                     scene.add(fragment);
-                    // Простая физика для осколков (можно заменить на rigid body)
                     fragment.userData.velocity = new THREE.Vector3(
                         (Math.random() - 0.5) * 15,
                         Math.random() * 15,
@@ -285,20 +300,16 @@
                 });
                 scene.remove(prop.mesh);
                 
-                // Добавляем осколки в пул обновления
                 fragments.forEach(frag => props.push({ mesh: frag, type: 'fragment', isFragment: true }));
             } 
             
-            // Удаляем оригинальный проп
             const idx = props.indexOf(prop);
             if (idx > -1) props.splice(idx, 1);
             
-            // Вспышка/искры (упрощенно)
             createSparks(pos);
         }
 
         function createSparks(pos) {
-            // ... (простая система частиц для искр)
             const particleGeo = new THREE.BufferGeometry();
             const count = 100;
             const positions = new Float32Array(count * 3);
@@ -310,13 +321,12 @@
             const particles = new THREE.Points(particleGeo, particleMat);
             scene.add(particles);
             
-            // Анимация частиц (упрощенно)
             let life = 0;
             const animateSparks = () => {
                 life += 0.05;
                 const posArray = particleGeo.attributes.position.array;
                 for(let i=0; i<count; i++) {
-                    posArray[i*3+1] -= 0.1; // Гравитация
+                    posArray[i*3+1] -= 0.1;
                 }
                 particleGeo.attributes.position.needsUpdate = true;
                 particleMat.opacity = 1 - life;
@@ -334,7 +344,6 @@
             requestAnimationFrame(animate);
             const dt = Math.min(clock.getDelta(), 0.05);
 
-            // FPS
             frames++;
             const now = performance.now();
             if (now - lastTime > 1000) {
@@ -342,7 +351,6 @@
                 frames = 0; lastTime = now;
             }
 
-            // Движение пресса
             if (wallLeft && wallRight) {
                 if (isCrushing) progress = Math.min(progress + dt * SPEED, 1);
                 else progress = Math.max(progress - dt * SPEED, 0);
@@ -350,12 +358,11 @@
                 wallLeft.position.x = THREE.MathUtils.lerp(startX1, targetX1, progress);
                 wallRight.position.x = THREE.MathUtils.lerp(startX2, targetX2, progress);
 
-                // Проверка столкновения с объектами
                 const gap = wallRight.position.x - wallLeft.position.x;
                 for (let i = props.length - 1; i >= 0; i--) {
                     const p = props[i];
                     if (p.isSoft && p.mesh.position.y > -1.5 && gap < 1.5) {
-                        // Мягкое тело сжимается физикой Ammo, здесь можно добавить проверку на разрыв
+                        // Мягкое тело сжимается физикой Ammo
                     }
                     if (p.isDestructible && gap < 1.2 && Math.abs(p.mesh.position.x) < 0.6) {
                         triggerDestruction(p, p.mesh.position);
@@ -363,11 +370,9 @@
                 }
             }
 
-            // Обновление физики Ammo
             if (ammoReady) {
                 physicsWorld.stepSimulation(dt, 10);
                 
-                // Синхронизация мягких тел
                 props.forEach(p => {
                     if (p.isSoft) {
                         const softBody = p.body;
@@ -375,7 +380,6 @@
                         const numNodes = nodes.size();
                         const positions = p.mesh.geometry.attributes.position.array;
                         
-                        // Обновляем вершины меша из физики (упрощенно, для демо)
                         for (let i = 0; i < Math.min(numNodes, positions.length / 3); i++) {
                             const node = nodes.at(i);
                             const pos = node.get_m_x();
@@ -389,12 +393,11 @@
                 });
             }
 
-            // Обновление осколков (простая физика)
             for (let i = props.length - 1; i >= 0; i--) {
                 const p = props[i];
                 if (p.isFragment) {
                     p.mesh.position.add(p.mesh.userData.velocity.clone().multiplyScalar(dt));
-                    p.mesh.userData.velocity.y -= 20 * dt; // Гравитация
+                    p.mesh.userData.velocity.y -= 20 * dt;
                     p.mesh.rotation.x += dt * 5;
                     p.mesh.rotation.y += dt * 3;
                     p.mesh.userData.life -= dt;
@@ -405,13 +408,12 @@
                 }
             }
 
-            // Обновление фокуса Bokeh (на центр пресса)
             if (bokehPass) {
                 bokehPass.uniforms['focus'].value = camera.position.distanceTo(new THREE.Vector3(0, 0, 0));
             }
 
             controls.update();
-            composer.render(); // Рендер с постобработкой
+            composer.render();
         }
 
         animate();
