@@ -3,13 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Гидравлический пресс: Физика и Разрушение</title>
+<title>Гидравлический пресс: Реалистичная физика</title>
 <style>
   body { margin:0; overflow:hidden; background:#141414; font-family:sans-serif; touch-action:none; user-select:none; }
   #canvas-container { width:100vw; height:100vh; display:block; }
   #loading { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); color:#fff; font-size:18px; text-align:center; }
   
-  /* UI Кнопки */
   #ui-top {
     position:absolute; top:20px; left:50%; transform:translateX(-50%);
     display:flex; gap:10px; z-index:10; width:90%; justify-content:center; flex-wrap:wrap;
@@ -44,7 +43,6 @@
 <div id="loading">Загрузка модели...</div>
 <div id="canvas-container"></div>
 
-<!-- Выбор предмета -->
 <div id="ui-top">
   <button class="spawn-btn" id="btn-balloon">🎈 Шарик</button>
   <button class="spawn-btn" id="btn-cooler">🥤 Кулер</button>
@@ -57,12 +55,15 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import * as CANNON from 'cannon-es';
 
 // ---------- Рендерер и Сцена ----------
 const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); // Ограничиваем pixel ratio для мобилок
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.shadowMap.enabled = true;
@@ -78,6 +79,12 @@ const camera = new THREE.PerspectiveCamera(50, window.innerWidth/window.innerHei
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 
+// ---------- Постобработка (Bloom для искр) ----------
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.5, 0.4, 0.85);
+composer.addPass(bloomPass);
+
 // ---------- Свет ----------
 scene.add(new THREE.HemisphereLight(0xffffff, 0x333333, 1.0));
 const dirLight = new THREE.DirectionalLight(0xffffff, 2.0);
@@ -86,17 +93,15 @@ dirLight.castShadow = true;
 dirLight.shadow.mapSize.set(1024, 1024);
 scene.add(dirLight);
 
-// ---------- Физический мир (Cannon-es) ----------
+// ---------- Физический мир ----------
 const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -20, 0) });
 world.allowSleep = true;
 
-// Пол в физике
 const groundBody = new CANNON.Body({ mass: 0, shape: new CANNON.Plane() });
 groundBody.quaternion.setFromEuler(-Math.PI/2, 0, 0);
-groundBody.position.y = -1.5; // Опускаем пол
+groundBody.position.y = -1.5;
 world.addBody(groundBody);
 
-// Визуальный пол
 const ground = new THREE.Mesh(
   new THREE.PlaneGeometry(100, 100),
   new THREE.MeshStandardMaterial({ color:0x222222, roughness:0.9 })
@@ -112,12 +117,9 @@ let isCrushing = false;
 let audioCtx = null;
 let shakeAmt = 0;
 let progress = 0; 
-const SPEED = 5.0; 
+const SPEED = 4.5; // Скорость движения пресса
 
 let startX1 = 0, startX2 = 0, targetX1 = 0, targetX2 = 0;
-let currentHalfWidth = 0;
-
-// Массив для созданных предметов (чтобы обновлять их физику)
 const props = [];
 
 // ---------- Загрузка пресса ----------
@@ -135,10 +137,10 @@ new GLTFLoader().load('./model.glb', (gltf) => {
 
   const rotatedBox = new THREE.Box3().setFromObject(wallLeft);
   const size = new THREE.Vector3(); rotatedBox.getSize(size);
-  currentHalfWidth = size.x / 2;
+  const halfWidth = size.x / 2;
   
-  targetX1 = -currentHalfWidth - 0.01; targetX2 = currentHalfWidth + 0.01;
-  startX1 = -currentHalfWidth - 3.5; startX2 = currentHalfWidth + 3.5;
+  targetX1 = -halfWidth - 0.01; targetX2 = halfWidth + 0.01;
+  startX1 = -halfWidth - 3.5; startX2 = halfWidth + 3.5;
 
   wallLeft.position.set(startX1, 0, 0); wallRight.position.set(startX2, 0, 0);
 
@@ -161,42 +163,62 @@ document.getElementById('btn-balloon').onclick = () => spawnProp('balloon');
 document.getElementById('btn-cooler').onclick = () => spawnProp('cooler');
 
 function spawnProp(type) {
-  // Позиция спавна: по центру, чуть выше пресса
   const startPos = new CANNON.Vec3(0, 4, 0);
   
   if (type === 'balloon') {
-    // --- Визуал шарика ---
+    // --- Визуал шарика с шейдером деформации ---
     const geo = new THREE.SphereGeometry(0.4, 32, 32);
-    // Делаем его похожим на резину
+    // Создаем кастомный материал на основе MeshPhysicalMaterial
     const mat = new THREE.MeshPhysicalMaterial({
       color: 0xff0000, roughness: 0.1, metalness: 0.0,
       clearcoat: 1.0, clearcoatRoughness: 0.1,
-      transmission: 0.1, thickness: 0.5
+      transmission: 0.1, thickness: 0.5,
+      // Включаем шейдер деформации
+      onBeforeCompile: (shader) => {
+        shader.uniforms.uSquash = { value: 0.0 }; // 0 - норма, 1 - полностью сплющен
+        shader.vertexShader = `
+          uniform float uSquash;
+          ${shader.vertexShader}
+        `.replace(
+          '#include <begin_vertex>',
+          `
+          #include <begin_vertex>
+          // Деформация: сжимаем по X и Y, растягиваем по Z (чтобы сохранить объем)
+          float squash = 1.0 - uSquash * 0.8;
+          transformed.x *= squash;
+          transformed.y *= squash;
+          transformed.z *= 1.0 + uSquash * 0.5;
+          `
+        );
+        mat.userData.shader = shader;
+      }
     });
+
     const mesh = new THREE.Mesh(geo, mat);
     mesh.castShadow = true;
     scene.add(mesh);
 
     // --- Физика шарика ---
     const shape = new CANNON.Sphere(0.4);
-    const body = new CANNON.Body({ mass: 0.1, shape }); // Легкий
+    const body = new CANNON.Body({ mass: 0.1, shape });
     body.position.copy(startPos);
-    // Немного крутим при падении
     body.angularVelocity.set(Math.random(), Math.random(), Math.random());
     world.addBody(body);
 
     props.push({ mesh, body, type, radius: 0.4 });
 
   } else if (type === 'cooler') {
-    // --- Визуал кулера (пластик + вода) ---
+    // --- Визуал кулера ---
     const group = new THREE.Group();
-    // Вода внутри (синяя)
+    // Вода (используем шейдер для эффекта жидкости)
     const waterGeo = new THREE.CylinderGeometry(0.35, 0.35, 1.0, 16);
-    const waterMat = new THREE.MeshPhysicalMaterial({ color: 0x00aaff, transmission: 0.8, transparent: true, opacity: 0.8, roughness: 0.1 });
+    const waterMat = new THREE.MeshPhysicalMaterial({ 
+      color: 0x00aaff, transmission: 0.8, transparent: true, opacity: 0.8, roughness: 0.1 
+    });
     const waterMesh = new THREE.Mesh(waterGeo, waterMat);
     group.add(waterMesh);
     
-    // Пластиковая оболочка
+    // Пластик
     const plasticGeo = new THREE.CylinderGeometry(0.4, 0.4, 1.2, 16);
     const plasticMat = new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 0.3, metalness: 0.1 });
     const plasticMesh = new THREE.Mesh(plasticGeo, plasticMat);
@@ -207,7 +229,7 @@ function spawnProp(type) {
 
     // --- Физика кулера ---
     const shape = new CANNON.Cylinder(0.4, 0.4, 1.2, 16);
-    const body = new CANNON.Body({ mass: 2.0, shape }); // Тяжелый
+    const body = new CANNON.Body({ mass: 2.0, shape });
     body.position.copy(startPos);
     world.addBody(body);
 
@@ -217,50 +239,44 @@ function spawnProp(type) {
 
 // ---------- ЭФФЕКТЫ РАЗРУШЕНИЯ ----------
 function destroyProp(prop) {
-  // 1. Удаляем из физического мира и сцены
   world.removeBody(prop.body);
   scene.remove(prop.mesh);
   const index = props.indexOf(prop);
   if (index > -1) props.splice(index, 1);
 
-  // 2. Тряска камеры
-  shakeAmt = 0.6;
+  shakeAmt = 0.8;
 
-  // 3. Эффекты в зависимости от типа
-  if (prop.type === 'balloon') {
-    createExplosion(prop.body.position, 0xff3333, 80, 15); // Красные куски резины
-    createExplosion(prop.body.position, 0xffffff, 30, 10); // Белый конденсат
-    playSound('pop');
-  } else if (prop.type === 'cooler') {
-    createExplosion(prop.body.position, 0x00aaff, 150, 12); // Брызги воды
-    createExplosion(prop.body.position, 0xeeeeee, 50, 15); // Осколки пластика
+  // Создаем частицы (брызги/осколки)
+  createExplosion(prop.body.position, prop.type === 'balloon' ? 0xff3333 : 0x00aaff, 150, 20);
+  
+  if (prop.type === 'cooler') {
+    // Для кулера добавляем осколки пластика
+    createExplosion(prop.body.position, 0xeeeeee, 80, 15);
     playSound('splash');
+  } else {
+    playSound('pop');
   }
 }
 
-// Универсальная система частиц
 function createExplosion(pos, color, count, speed) {
   const geo = new THREE.BufferGeometry();
   const positions = new Float32Array(count * 3);
   const velocities = [];
 
   for (let i = 0; i < count; i++) {
-    positions[i*3] = pos.x + (Math.random()-0.5)*0.5;
-    positions[i*3+1] = pos.y + (Math.random()-0.5)*0.5;
-    positions[i*3+2] = pos.z + (Math.random()-0.5)*0.5;
-
+    positions[i*3] = pos.x;
+    positions[i*3+1] = pos.y;
+    positions[i*3+2] = pos.z;
     velocities.push(new THREE.Vector3(
       (Math.random()-0.5) * speed,
-      (Math.random()-0.5) * speed + 5, // Чуть вверх
+      (Math.random()-0.5) * speed + 5,
       (Math.random()-0.5) * speed
     ));
   }
 
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  // Размер частиц для воды меньше, для резины больше
   const mat = new THREE.PointsMaterial({ 
-    color: color, size: prop => prop.type === 'cooler' ? 0.05 : 0.1, 
-    transparent: true, opacity: 1, depthWrite: false 
+    color: color, size: 0.08, transparent: true, opacity: 1, depthWrite: false 
   });
   
   const particles = new THREE.Points(geo, mat);
@@ -271,13 +287,10 @@ function createExplosion(pos, color, count, speed) {
     life += 0.016;
     const array = geo.attributes.position.array;
     for (let i = 0; i < count; i++) {
-      velocities[i].y -= 30 * 0.016; // Гравитация частиц
+      velocities[i].y -= 30 * 0.016;
       array[i*3] += velocities[i].x * 0.016;
       array[i*3+1] += velocities[i].y * 0.016;
       array[i*3+2] += velocities[i].z * 0.016;
-      
-      // Отскок от пола
-      if (array[i*3+1] < -1.5) { array[i*3+1] = -1.5; velocities[i].y *= -0.3; velocities[i].x *= 0.8; velocities[i].z *= 0.8; }
     }
     geo.attributes.position.needsUpdate = true;
     mat.opacity = Math.max(0, 1 - life * 1.2);
@@ -287,13 +300,12 @@ function createExplosion(pos, color, count, speed) {
   tick();
 }
 
-// ---------- ЗВУКИ (Web Audio API) ----------
 function playSound(type) {
   if (!audioCtx) return;
   const ctx = audioCtx, now = ctx.currentTime;
 
   if (type === 'pop') {
-    // Резкий хлопок (белый шум)
+    // Более реалистичный звук лопнувшего шара
     const bufferSize = ctx.sampleRate * 0.1;
     const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
     const data = buffer.getChannelData(0);
@@ -305,14 +317,13 @@ function playSound(type) {
     
     noise.connect(filter).connect(gain).connect(ctx.destination); noise.start();
     
-    // Низкий бас
     const osc = ctx.createOscillator(); const oscGain = ctx.createGain();
     osc.frequency.setValueAtTime(150, now); osc.frequency.exponentialRampToValueAtTime(40, now + 0.1);
     oscGain.gain.setValueAtTime(1, now); oscGain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
     osc.connect(oscGain).connect(ctx.destination); osc.start(); osc.stop(now + 0.2);
   } 
   else if (type === 'splash') {
-    // Звук лопающегося кулера (шум воды)
+    // Звук разбившегося кулера
     const bufferSize = ctx.sampleRate * 0.6;
     const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
     const data = buffer.getChannelData(0);
@@ -333,7 +344,7 @@ function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.05);
 
-  // 1. Движение пресса
+  // 1. Движение пресса (привязано к dt)
   if (wallLeft && wallRight) {
     if (isCrushing) progress = Math.min(progress + dt * SPEED, 1);
     else progress = Math.max(progress - dt * SPEED, 0);
@@ -345,17 +356,24 @@ function animate() {
   // 2. Обновление физики
   world.step(1/60, dt, 3);
   
-  // Синхронизация визуала и физики
+  // 3. Синхронизация и проверка на сжатие
   for (let i = props.length - 1; i >= 0; i--) {
     const p = props[i];
     p.mesh.position.copy(p.body.position);
     p.mesh.quaternion.copy(p.body.quaternion);
 
-    // 3. ПРОВЕРКА НА СДАВЛИВАНИЕ
-    // Если пресс движется навстречу и предмет находится ровно между стенами
+    // Проверка на сдавливание
     if (isCrushing && progress > 0.1) {
       const gap = wallRight.position.x - wallLeft.position.x;
-      // Если расстояние между стенами стало меньше диаметра предмета - ВЗРЫВАЕМ
+      
+      // Для шарика: визуальная деформация
+      if (p.type === 'balloon' && p.mesh.material.userData.shader) {
+        // Вычисляем, насколько сильно сжат шарик
+        const squashFactor = THREE.MathUtils.clamp(1 - (gap - p.radius * 2) / 0.5, 0, 1);
+        p.mesh.material.userData.shader.uniforms.uSquash.value = squashFactor;
+      }
+
+      // Условие разрушения (когда стены слишком близко)
       if (gap <= (p.radius * 2) && Math.abs(p.body.position.x) < p.radius) {
         destroyProp(p);
       }
@@ -370,7 +388,7 @@ function animate() {
   }
 
   controls.update();
-  renderer.render(scene, camera);
+  composer.render(); // Используем composer для рендера с постобработкой
 }
 animate();
 
@@ -378,6 +396,7 @@ window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth/window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  composer.setSize(window.innerWidth, window.innerHeight);
 });
 </script>
 </body>
