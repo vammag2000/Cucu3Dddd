@@ -39,10 +39,7 @@
         #fps { position:absolute; top:80px; right:20px; color:#0f0; font-family:monospace; font-size:14px; background:rgba(0,0,0,0.6); padding:4px 8px; border-radius:5px; z-index:20; }
     </style>
     
-    <!-- 1. Загружаем Ammo.js как обычный скрипт (глобальная переменная) -->
-    <script src="https://cdn.jsdelivr.net/npm/ammo.js@0.0.10/builds/ammo.wasm.js"></script>
-
-    <!-- 2. Подключаем Three.js и остальные модули через importmap -->
+    <!-- Стабильные ссылки на модули -->
     <script type="importmap">
     {
         "imports": {
@@ -77,14 +74,6 @@
         import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
         import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
         import * as PINATA from 'three-pinata';
-
-        // Показываем ошибку на экране, если что-то пойдет не так
-        function showError(msg) {
-            const box = document.getElementById('error-box');
-            box.style.display = 'block';
-            box.innerText = 'ОШИБКА: ' + msg;
-            document.getElementById('loading').style.display = 'none';
-        }
 
         // --- 1. Рендерер и Сцена ---
         const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
@@ -138,46 +127,61 @@
         rimLight.position.set(-5, 5, -7);
         scene.add(rimLight);
 
-        // --- 4. Инициализация Ammo.js (теперь через глобальную переменную) ---
+        // --- 4. Инициализация Ammo.js (надежный способ) ---
         let physicsWorld;
         let softBodySolver;
         const clock = new THREE.Clock();
         const props = [];
         let ammoReady = false;
 
-        // Ждем, пока Ammo.js загрузится (он уже подключен в <head>)
-        if (typeof Ammo === 'undefined') {
-            showError('Не удалось загрузить Ammo.js. Проверьте интернет.');
-        } else {
-            Ammo().then((AmmoLib) => {
-                try {
-                    const collisionConfiguration = new AmmoLib.btSoftBodyRigidBodyCollisionConfiguration();
-                    const dispatcher = new AmmoLib.btCollisionDispatcher(collisionConfiguration);
-                    const broadphase = new AmmoLib.btDbvtBroadphase();
-                    const solver = new AmmoLib.btSequentialImpulseConstraintSolver();
-                    softBodySolver = new AmmoLib.btDefaultSoftBodySolver();
-                    
-                    physicsWorld = new AmmoLib.btSoftRigidDynamicsWorld(dispatcher, broadphase, solver, collisionConfiguration, softBodySolver);
-                    physicsWorld.setGravity(new AmmoLib.btVector3(0, -20, 0));
-                    
-                    // Пол в физике
-                    const groundShape = new AmmoLib.btBoxShape(new AmmoLib.btVector3(50, 0.5, 50));
-                    const groundBody = new AmmoLib.btRigidBody(new AmmoLib.btRigidBodyConstructionInfo(0, null, groundShape));
-                    groundBody.setWorldTransform(new AmmoLib.btTransform(new AmmoLib.btQuaternion(0,0,0,1), new AmmoLib.btVector3(0, -1.5, 0)));
-                    physicsWorld.addRigidBody(groundBody);
+        async function initPhysics() {
+            try {
+                // Загружаем Ammo.js как обычный скрипт
+                await new Promise((resolve, reject) => {
+                    const script = document.createElement('script');
+                    // Используем проверенный CDN с явной версией
+                    script.src = 'https://cdn.jsdelivr.net/gh/kripken/ammo.js@79190a1f03845794b1bba1777f30037349967658/builds/ammo.wasm.js';
+                    script.onload = resolve;
+                    script.onerror = () => reject(new Error('Не удалось загрузить ammo.wasm.js'));
+                    document.head.appendChild(script);
+                });
 
-                    ammoReady = true;
-                    document.getElementById('loading').style.display = 'none';
-                    document.getElementById('crush-btn').disabled = false;
-                    initPress();
-                } catch (err) {
-                    console.error(err);
-                    showError('Ошибка настройки физического мира: ' + err.message);
+                // Ждем, пока Ammo станет доступен и инициализируется
+                if (typeof Ammo === 'undefined') {
+                    throw new Error('Переменная Ammo не определена после загрузки скрипта.');
                 }
-            }).catch(err => {
-                showError('Ошибка инициализации Ammo: ' + err.message);
-            });
+
+                const AmmoLib = await Ammo();
+                
+                const collisionConfiguration = new AmmoLib.btSoftBodyRigidBodyCollisionConfiguration();
+                const dispatcher = new AmmoLib.btCollisionDispatcher(collisionConfiguration);
+                const broadphase = new AmmoLib.btDbvtBroadphase();
+                const solver = new AmmoLib.btSequentialImpulseConstraintSolver();
+                softBodySolver = new AmmoLib.btDefaultSoftBodySolver();
+                
+                physicsWorld = new AmmoLib.btSoftRigidDynamicsWorld(dispatcher, broadphase, solver, collisionConfiguration, softBodySolver);
+                physicsWorld.setGravity(new AmmoLib.btVector3(0, -20, 0));
+                
+                const groundShape = new AmmoLib.btBoxShape(new AmmoLib.btVector3(50, 0.5, 50));
+                const groundBody = new AmmoLib.btRigidBody(new AmmoLib.btRigidBodyConstructionInfo(0, null, groundShape));
+                groundBody.setWorldTransform(new AmmoLib.btTransform(new AmmoLib.btQuaternion(0,0,0,1), new AmmoLib.btVector3(0, -1.5, 0)));
+                physicsWorld.addRigidBody(groundBody);
+
+                ammoReady = true;
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('crush-btn').disabled = false;
+                initPress();
+
+            } catch (err) {
+                console.error("Ошибка инициализации физики:", err);
+                // Показываем ошибку на экране
+                const box = document.getElementById('error-box');
+                box.style.display = 'block';
+                box.innerText = 'ОШИБКА ФИЗИКИ: ' + err.message;
+                document.getElementById('loading').style.display = 'none';
+            }
         }
+        initPhysics();
 
         // Визуальный пол
         const groundMesh = new THREE.Mesh(
@@ -221,7 +225,9 @@
                 const camDist = Math.max(size.y * 1.8, size.x * 4, 10);
                 camera.position.set(0, 2, camDist); controls.target.set(0, 0, 0);
             }, undefined, (err) => {
-                showError('Не удалось загрузить model.glb. Проверьте, что файл лежит рядом с index.html.');
+                console.error("Ошибка загрузки модели:", err);
+                document.getElementById('error-box').style.display = 'block';
+                document.getElementById('error-box').innerText = 'ОШИБКА: не удалось загрузить model.glb';
             });
         }
 
@@ -266,7 +272,6 @@
             const geo = new THREE.CylinderGeometry(0.5, 0.5, 1.5, 32);
             const mat = new THREE.MeshStandardMaterial({ color: 0x00aaff, roughness: 0.2, metalness: 0.5 });
             
-            // Используем PINATA (импортированный как пространство имен)
             const destructible = new PINATA.DestructibleMesh(geo, mat, new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 }));
             destructible.castShadow = true; destructible.receiveShadow = true;
             destructible.position.set(0, 5, 0);
