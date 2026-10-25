@@ -204,10 +204,9 @@
             document.getElementById('loading').style.display = 'none';
             document.getElementById('crush-btn').disabled = false;
         }, undefined, (err) => {
-            // Если пресс не загрузился, показываем ошибку
             document.getElementById('loading').style.display = 'none';
             document.getElementById('error-msg').style.display = 'block';
-            document.getElementById('error-msg').innerHTML = 'ОШИБКА: Файл model.glb не найден!<br>Проверьте, что он лежит в папке с index.html';
+            document.getElementById('error-msg').innerHTML = 'ОШИБКА: Файл model.glb не найден!';
         });
 
         // Предзагрузка кости
@@ -220,7 +219,7 @@
             kostyaModelTemplate = gltf.scene;
             kostyaModelTemplate.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
         }, undefined, () => {
-            console.warn("Файл kostya.glb не найден. Кость не появится на 3-м этапе.");
+            console.warn("Файл kostya.glb не найден.");
         });
 
         // --- 3. КНОПКИ ---
@@ -283,11 +282,11 @@
                 group.add(model);
                 scene.add(group);
 
-                // Спавним ровно на полу (Y = -1.5 + половина высоты), чтобы не падало
+                // Спавним ровно на полу, без падения
                 const spawnY = -1.5 + size.y / 2;
                 const body = new CANNON.Body({ mass: 2.0, shape: new CANNON.Box(new CANNON.Vec3(size.x/2, size.y/2, size.z/2)) });
                 body.position.set(0, spawnY, 0);
-                body.fixedRotation = true; // Запрещаем вращение
+                body.fixedRotation = true; 
                 body.updateMassProperties();
                 world.addBody(body);
 
@@ -426,38 +425,40 @@
                     const fragmentsExist = props.some(p => p.type === 'fragment');
                     
                     if (lifeExists) {
-                        // Обрабатываем бедро
                         const lifeProp = props.find(p => p.type === 'life');
                         handleLifeCrush(lifeProp);
-                    } else if (fragmentsExist && kostyaModelTemplate) {
-                        // ЭТАП 3: Появление кости
-                        playMetalClankSound();
-                        for (let i = props.length - 1; i >= 0; i--) {
-                            if (props[i].type === 'fragment') {
-                                scene.remove(props[i].mesh);
-                                world.removeBody(props[i].body);
-                                props.splice(i, 1);
+                    } else if (fragmentsExist) {
+                        if (kostyaModelTemplate) {
+                            // ЭТАП 3: Появление кости
+                            playMetalClankSound();
+                            for (let i = props.length - 1; i >= 0; i--) {
+                                if (props[i].type === 'fragment') {
+                                    scene.remove(props[i].mesh);
+                                    world.removeBody(props[i].body);
+                                    props.splice(i, 1);
+                                }
                             }
+                            
+                            const bone = kostyaModelTemplate.clone();
+                            const bBox = new THREE.Box3().setFromObject(bone);
+                            const bCenter = new THREE.Vector3(); bBox.getCenter(bCenter);
+                            bone.position.sub(bCenter);
+                            
+                            const group = new THREE.Group();
+                            group.add(bone);
+                            scene.add(group);
+
+                            const bBody = new CANNON.Body({ mass: 1.0, shape: new CANNON.Box(new CANNON.Vec3(0.5, 0.5, 0.5)) });
+                            bBody.position.set(0, -1.0, 0);
+                            bBody.fixedRotation = true;
+                            world.addBody(bBody);
+
+                            props.push({ mesh: group, body: bBody, type: 'bone' });
+                        } else {
+                            document.getElementById('error-msg').style.display = 'block';
+                            document.getElementById('error-msg').innerHTML = 'ОШИБКА: Файл kostya.glb не загружен!<br>Кость не может появиться.';
                         }
-                        
-                        const bone = kostyaModelTemplate.clone();
-                        const bBox = new THREE.Box3().setFromObject(bone);
-                        const bCenter = new THREE.Vector3(); bBox.getCenter(bCenter);
-                        bone.position.sub(bCenter);
-                        
-                        const group = new THREE.Group();
-                        group.add(bone);
-                        scene.add(group);
-
-                        // Спавним кость ровно по центру
-                        const bBody = new CANNON.Body({ mass: 1.0, shape: new CANNON.Box(new CANNON.Vec3(0.5, 0.5, 0.5)) });
-                        bBody.position.set(0, -1.0, 0);
-                        bBody.fixedRotation = true;
-                        world.addBody(bBody);
-
-                        props.push({ mesh: group, body: bBody, type: 'bone' });
-                    } else if (!lifeExists && !fragmentsExist) {
-                        // Просто звук удара, если ничего нет
+                    } else {
                         playMetalClankSound();
                         shakeCamera(0.3);
                     }
