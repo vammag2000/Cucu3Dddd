@@ -32,12 +32,13 @@
         #crush-btn:disabled { background:#333; box-shadow:none; color:#777; }
         
         #fps { position:absolute; top:80px; right:20px; color:#0f0; font-family:monospace; font-size:14px; background:rgba(0,0,0,0.6); padding:4px 8px; border-radius:5px; z-index:20; }
-        #loading { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); color:#fff; font-size:18px; z-index:100; }
+        #loading { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); color:#fff; font-size:18px; z-index:100; text-align:center; }
         
         #error-msg {
             position:absolute; top:20%; left:50%; transform:translateX(-50%);
             background:rgba(255,0,0,0.8); color:white; padding:15px; border-radius:10px;
-            font-size:14px; display:none; z-index:200; text-align:center; width:80%; pointer-events:none;
+            font-size:16px; display:none; z-index:200; text-align:center; width:80%; pointer-events:none;
+            font-weight: bold;
         }
     </style>
     
@@ -52,7 +53,7 @@
     </script>
 </head>
 <body>
-    <div id="loading">Загрузка...</div>
+    <div id="loading">Загрузка пресса...</div>
     <div id="error-msg">Ошибка загрузки</div>
     <div id="canvas-container"></div>
     <div id="fps">FPS: --</div>
@@ -60,7 +61,7 @@
     <div id="ui-top">
         <button class="spawn-btn" id="btn-balloon">🎈 Шарик</button>
         <button class="spawn-btn" id="btn-cooler">🥤 Кулер</button>
-        <button class="spawn-btn" id="btn-custom">🍗 Куриное бедро (life)</button>
+        <button class="spawn-btn" id="btn-custom">🍗 Куриное бедро</button>
     </div>
 
     <button id="crush-btn" disabled>ДАВИТЬ</button>
@@ -82,7 +83,6 @@
         function playSquishSound() {
             if (!audioCtx) return;
             const t = audioCtx.currentTime;
-            // Звук чавканья/сжатия
             const osc = audioCtx.createOscillator(); const oscGain = audioCtx.createGain();
             osc.type = 'sine'; osc.frequency.setValueAtTime(200, t); osc.frequency.exponentialRampToValueAtTime(50, t + 0.3);
             oscGain.gain.setValueAtTime(0.5, t); oscGain.gain.exponentialRampToValueAtTime(0.01, t + 0.3);
@@ -102,9 +102,25 @@
             noise.connect(filter).connect(gain).connect(audioCtx.destination); noise.start(t);
         }
 
-        function playPopSound() { /* ... (из прошлого кода) ... */ }
-        function playSmashSound() { /* ... (из прошлого кода) ... */ }
-        function playMetalClankSound() { /* ... (из прошлого кода) ... */ }
+        function playPopSound() {
+            if (!audioCtx) return;
+            const t = audioCtx.currentTime;
+            const osc = audioCtx.createOscillator(); const oscGain = audioCtx.createGain();
+            osc.type = 'sine'; osc.frequency.setValueAtTime(150, t); osc.frequency.exponentialRampToValueAtTime(40, t + 0.1);
+            oscGain.gain.setValueAtTime(1, t); oscGain.gain.exponentialRampToValueAtTime(0.01, t + 0.2);
+            osc.connect(oscGain).connect(audioCtx.destination); osc.start(t); osc.stop(t + 0.2);
+        }
+
+        function playMetalClankSound() {
+            if (!audioCtx) return;
+            const t = audioCtx.currentTime;
+            [800, 1200, 1500].forEach((freq, i) => {
+                const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
+                osc.type = 'triangle'; osc.frequency.setValueAtTime(freq, t);
+                gain.gain.setValueAtTime(0.15 - i * 0.03, t); gain.gain.exponentialRampToValueAtTime(0.01, t + 0.4);
+                osc.connect(gain).connect(audioCtx.destination); osc.start(t); osc.stop(t + 0.4);
+            });
+        }
 
         // --- 2. БАЗА ---
         const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -159,10 +175,9 @@
         const clock = new THREE.Clock();
         let hasClanked = false; 
         
-        let crushCount = 0; // Счетчик нажатий
-        let kostyaModelTemplate = null; // Шаблон для кости
+        let kostyaModelTemplate = null; 
 
-        // Загружаем пресс
+        // Загрузка пресса
         new GLTFLoader().load('./model.glb', (gltf) => {
             const src = gltf.scene;
             const box = new THREE.Box3().setFromObject(src);
@@ -188,9 +203,14 @@
 
             document.getElementById('loading').style.display = 'none';
             document.getElementById('crush-btn').disabled = false;
+        }, undefined, (err) => {
+            // Если пресс не загрузился, показываем ошибку
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('error-msg').style.display = 'block';
+            document.getElementById('error-msg').innerHTML = 'ОШИБКА: Файл model.glb не найден!<br>Проверьте, что он лежит в папке с index.html';
         });
 
-        // Предзагружаем кость (kostya.glb)
+        // Предзагрузка кости
         const loader = new GLTFLoader();
         const dracoLoader = new DRACOLoader();
         dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
@@ -211,9 +231,36 @@
             document.getElementById('crush-btn').innerText = isCrushing ? 'РАЗДВИНУТЬ' : 'ДАВИТЬ';
         });
 
+        document.getElementById('btn-balloon').onclick = () => { initAudio(); spawnBalloon(); };
+        document.getElementById('btn-cooler').onclick = () => { initAudio(); spawnCooler(); };
         document.getElementById('btn-custom').onclick = () => { initAudio(); spawnLife(); };
 
-        // --- 4. СПАВН LIFE ---
+        // --- 4. СПАВН ОБЪЕКТОВ ---
+        function spawnBalloon() {
+            const geo = new THREE.SphereGeometry(0.6, 32, 32);
+            const mat = new THREE.MeshStandardMaterial({ color: 0xff2222, roughness: 0.1, metalness: 0.2 });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.castShadow = true; scene.add(mesh);
+            const body = new CANNON.Body({ mass: 0.1, shape: new CANNON.Sphere(0.6) });
+            body.position.set(0, 4, 0);
+            world.addBody(body);
+            props.push({ mesh, body, type: 'balloon' });
+        }
+
+        function spawnCooler() {
+            const group = new THREE.Group();
+            const waterMat = new THREE.MeshStandardMaterial({ color: 0x00aaff, transparent: true, opacity: 0.8 });
+            group.add(new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 1.4, 16), waterMat));
+            const plasticMat = new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 0.4 });
+            const plasticMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 1.5, 16), plasticMat);
+            plasticMesh.castShadow = true; group.add(plasticMesh);
+            scene.add(group);
+            const body = new CANNON.Body({ mass: 2.0, shape: new CANNON.Cylinder(0.5, 0.5, 1.5, 16) });
+            body.position.set(0, 4, 0);
+            world.addBody(body);
+            props.push({ mesh: group, body, type: 'cooler' });
+        }
+
         function spawnLife() {
             const errorDiv = document.getElementById('error-msg');
             errorDiv.style.display = 'none';
@@ -225,10 +272,9 @@
                 const center = new THREE.Vector3(); box.getCenter(center);
                 model.position.sub(center);
 
-                // Масштабируем
                 const maxDim = Math.max(size.x, size.y, size.z);
                 if (maxDim > 0) {
-                    const scale = 1.2 / maxDim; // Чуть меньше пресса
+                    const scale = 1.2 / maxDim;
                     model.scale.set(scale, scale, scale);
                     size.multiplyScalar(scale);
                 }
@@ -237,11 +283,11 @@
                 group.add(model);
                 scene.add(group);
 
-                // ФИЗИКА: Запрещаем вращение, чтобы он падал ровно!
-                const shape = new CANNON.Box(new CANNON.Vec3(size.x/2, size.y/2, size.z/2));
-                const body = new CANNON.Body({ mass: 1.5, shape });
-                body.position.set(0, 4, 0);
-                body.fixedRotation = true; // НЕ ПАДАЕТ, СТОИТ РОВНО
+                // Спавним ровно на полу (Y = -1.5 + половина высоты), чтобы не падало
+                const spawnY = -1.5 + size.y / 2;
+                const body = new CANNON.Body({ mass: 2.0, shape: new CANNON.Box(new CANNON.Vec3(size.x/2, size.y/2, size.z/2)) });
+                body.position.set(0, spawnY, 0);
+                body.fixedRotation = true; // Запрещаем вращение
                 body.updateMassProperties();
                 world.addBody(body);
 
@@ -249,18 +295,17 @@
                     mesh: group, 
                     body, 
                     type: 'life', 
-                    radius: Math.max(size.x, size.z) / 2,
                     originalSize: size.clone(),
-                    stage: 0 // 0 - целый, 1 - сплющен
+                    stage: 0 
                 });
 
             }, undefined, (err) => {
                 errorDiv.style.display = 'block';
-                errorDiv.innerHTML = 'Не удалось загрузить life.glb<br>Проверьте имя и папку';
+                errorDiv.innerHTML = 'ОШИБКА: Файл life.glb не найден!';
             });
         }
 
-        // --- 5. ЭФФЕКТЫ (КРОВЬ) ---
+        // --- 5. КРОВЬ И РАЗРУШЕНИЕ ---
         function spawnBloodDrops(pos, count = 30, speed = 10) {
             const geo = new THREE.BufferGeometry();
             const positions = new Float32Array(count * 3);
@@ -270,7 +315,7 @@
                 velocities.push(new THREE.Vector3((Math.random()-0.5)*speed, Math.random()*speed, (Math.random()-0.5)*speed));
             }
             geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-            const mat = new THREE.PointsMaterial({ color: 0x990000, size: 0.08, transparent: true, opacity: 1 });
+            const mat = new THREE.PointsMaterial({ color: 0x990000, size: 0.08, transparent: true });
             const particles = new THREE.Points(geo, mat);
             scene.add(particles);
             
@@ -283,7 +328,7 @@
                     arr[i*3] += velocities[i].x * 0.02;
                     arr[i*3+1] += velocities[i].y * 0.02;
                     arr[i*3+2] += velocities[i].z * 0.02;
-                    if (arr[i*3+1] < -1.5) { arr[i*3+1] = -1.5; velocities[i].y = 0; velocities[i].x = 0; velocities[i].z = 0; } // Оседает на полу
+                    if (arr[i*3+1] < -1.5) { arr[i*3+1] = -1.5; velocities[i].set(0,0,0); } 
                 }
                 geo.attributes.position.needsUpdate = true;
                 mat.opacity = Math.max(0, 1 - life * 0.5);
@@ -294,80 +339,56 @@
         }
 
         function addBloodStain(pos, normal, parent) {
-            // Создаем лужу (плоский круг)
             const geo = new THREE.CircleGeometry(Math.random() * 0.4 + 0.2, 16);
             const mat = new THREE.MeshBasicMaterial({ color: 0x660000, transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide });
             const stain = new THREE.Mesh(geo, mat);
-            
             stain.position.copy(pos);
             
-            // Ориентируем по нормали поверхности
-            if (normal.equals(new THREE.Vector3(0, 1, 0))) {
-                stain.rotation.x = -Math.PI / 2;
-                stain.position.y += 0.01;
-            } else if (normal.equals(new THREE.Vector3(1, 0, 0))) {
-                stain.rotation.y = Math.PI / 2;
-                stain.position.x += 0.01;
-            } else if (normal.equals(new THREE.Vector3(-1, 0, 0))) {
-                stain.rotation.y = -Math.PI / 2;
-                stain.position.x -= 0.01;
-            }
+            if (normal.equals(new THREE.Vector3(0, 1, 0))) { stain.rotation.x = -Math.PI / 2; stain.position.y += 0.01; }
+            else if (normal.equals(new THREE.Vector3(1, 0, 0))) { stain.rotation.y = Math.PI / 2; stain.position.x += 0.01; }
+            else if (normal.equals(new THREE.Vector3(-1, 0, 0))) { stain.rotation.y = -Math.PI / 2; stain.position.x -= 0.01; }
 
             parent.add(stain);
         }
 
-        // --- 6. ЛОГИКА РАЗРУШЕНИЯ LIFE ---
+        // --- 6. ЛОГИКА СТАДИЙ ---
         function handleLifeCrush(prop) {
             if (prop.stage === 0) {
-                // ЭТАП 1: Сжатие и брызги, но остается целым
+                // ЭТАП 1: Сжатие
                 prop.stage = 1;
                 playSquishSound();
                 shakeCamera(0.2);
-                
-                // Брызги крови
                 spawnBloodDrops(prop.body.position, 40, 8);
-                
-                // Пятна на шипах
                 addBloodStain(new THREE.Vector3(wallLeft.position.x + 1.5, 0, 0), new THREE.Vector3(1, 0, 0), scene);
                 addBloodStain(new THREE.Vector3(wallRight.position.x - 1.5, 0, 0), new THREE.Vector3(-1, 0, 0), scene);
                 
             } else if (prop.stage === 1) {
-                // ЭТАП 2: Полный разрыв на куски
+                // ЭТАП 2: Разрыв на мясо
                 playCrunchSound();
                 shakeCamera(0.5);
-                
                 const pos = prop.body.position;
                 
-                // Удаляем бедро
                 scene.remove(prop.mesh);
                 world.removeBody(prop.body);
                 const idx = props.indexOf(prop);
                 if (idx > -1) props.splice(idx, 1);
 
-                // Много крови
                 spawnBloodDrops(pos, 100, 15);
-                
-                // Лужи на полу
                 for(let i=0; i<5; i++) {
                     addBloodStain(new THREE.Vector3((Math.random()-0.5)*2, -1.49, (Math.random()-0.5)*2), new THREE.Vector3(0, 1, 0), scene);
                 }
 
-                // Куски мяса
                 for (let i = 0; i < 20; i++) {
                     const size = Math.random() * 0.15 + 0.05;
-                    const fragMesh = new THREE.Mesh(
-                        new THREE.SphereGeometry(size, 8, 8), // Круглые куски
-                        new THREE.MeshStandardMaterial({ color: 0xcc1111, roughness: 0.6 })
-                    );
-                    fragMesh.castShadow = true;
-                    scene.add(fragMesh);
+                    const fragMesh = new THREE.Mesh(new THREE.SphereGeometry(size, 8, 8), new THREE.MeshStandardMaterial({ color: 0xcc1111, roughness: 0.6 }));
+                    fragMesh.castShadow = true; scene.add(fragMesh);
 
                     const fragBody = new CANNON.Body({ mass: 0.1, shape: new CANNON.Sphere(size) });
                     fragBody.position.set(pos.x + (Math.random()-0.5)*0.4, pos.y + (Math.random()-0.5)*0.4, pos.z + (Math.random()-0.5)*0.4);
                     fragBody.velocity.set((Math.random()-0.5)*10, Math.random()*8 + 2, (Math.random()-0.5)*10);
                     world.addBody(fragBody);
 
-                    props.push({ mesh: fragMesh, body: fragBody, type: 'fragment', life: 4.0 });
+                    props.push({ mesh: fragMesh, body: fragBody, type: 'fragment', life: 10.0 });
                 }
             }
         }
@@ -397,83 +418,61 @@
                 const currentGap = wallRight.position.x - wallLeft.position.x;
                 const centerGap = currentGap - (targetX2 - targetX1); 
 
-                // Проверка сжатия LIFE
-                for (let i = props.length - 1; i >= 0; i--) {
-                    const p = props[i];
-                    
-                    if (p.type === 'life') {
-                        if (Math.abs(p.body.position.x) < 1.5 && p.body.position.y > -1.5) {
-                            // Визуальное сплющивание
-                            const squashFactor = THREE.MathUtils.clamp(1 - (centerGap / p.originalSize.x), 0, 1);
-                            p.mesh.scale.x = Math.max(0.2, 1 - squashFactor * 0.7); // Сжимаем по X
-                            p.mesh.scale.y = 1 + squashFactor * 0.2; // Растягиваем по Y
-                            
-                            // Если пресс дошел до конца и это первый этап - ломаем
-                            if (progress >= 0.99 && isCrushing && !hasClanked) {
-                                hasClanked = true;
-                                handleLifeCrush(p);
-                            }
-                        }
-                    }
-
-                    // Обычные осколки
-                    if (p.type === 'fragment') {
-                        p.life -= dt;
-                        if (p.life <= 0) {
-                            scene.remove(p.mesh);
-                            world.removeBody(p.body);
-                            props.splice(i, 1);
-                        }
-                    }
-                }
-
-                // ТРЕТИЙ ЭТАП: Появление кости
+                // Логика при полном сжатии
                 if (progress >= 0.99 && isCrushing && !hasClanked) {
                     hasClanked = true;
                     
-                    // Если был 2-й этап (разрыв), спавним кость
                     const lifeExists = props.some(p => p.type === 'life');
-                    if (!lifeExists && crushCount === 1) {
-                        crushCount++; // Теперь 3-й этап
+                    const fragmentsExist = props.some(p => p.type === 'fragment');
+                    
+                    if (lifeExists) {
+                        // Обрабатываем бедро
+                        const lifeProp = props.find(p => p.type === 'life');
+                        handleLifeCrush(lifeProp);
+                    } else if (fragmentsExist && kostyaModelTemplate) {
+                        // ЭТАП 3: Появление кости
                         playMetalClankSound();
-                        
-                        if (kostyaModelTemplate) {
-                            // Убираем старое мясо
-                            for (let i = props.length - 1; i >= 0; i--) {
-                                if (props[i].type === 'fragment') {
-                                    scene.remove(props[i].mesh);
-                                    world.removeBody(props[i].body);
-                                    props.splice(i, 1);
-                                }
+                        for (let i = props.length - 1; i >= 0; i--) {
+                            if (props[i].type === 'fragment') {
+                                scene.remove(props[i].mesh);
+                                world.removeBody(props[i].body);
+                                props.splice(i, 1);
                             }
-
-                            // Добавляем кость
-                            const bone = kostyaModelTemplate.clone();
-                            const bBox = new THREE.Box3().setFromObject(bone);
-                            const bCenter = new THREE.Vector3(); bBox.getCenter(bCenter);
-                            bone.position.sub(bCenter);
-                            bone.scale.set(1.2, 1.2, 1.2);
-
-                            const group = new THREE.Group();
-                            group.add(bone);
-                            scene.add(group);
-
-                            const bShape = new CANNON.Box(new CANNON.Vec3(0.5, 0.5, 0.5)); // Примерный размер
-                            const bBody = new CANNON.Body({ mass: 1.0, shape: bShape });
-                            bBody.position.set(0, 0, 0);
-                            bBody.fixedRotation = true;
-                            world.addBody(bBody);
-
-                            props.push({ mesh: group, body: bBody, type: 'bone' });
                         }
+                        
+                        const bone = kostyaModelTemplate.clone();
+                        const bBox = new THREE.Box3().setFromObject(bone);
+                        const bCenter = new THREE.Vector3(); bBox.getCenter(bCenter);
+                        bone.position.sub(bCenter);
+                        
+                        const group = new THREE.Group();
+                        group.add(bone);
+                        scene.add(group);
+
+                        // Спавним кость ровно по центру
+                        const bBody = new CANNON.Body({ mass: 1.0, shape: new CANNON.Box(new CANNON.Vec3(0.5, 0.5, 0.5)) });
+                        bBody.position.set(0, -1.0, 0);
+                        bBody.fixedRotation = true;
+                        world.addBody(bBody);
+
+                        props.push({ mesh: group, body: bBody, type: 'bone' });
+                    } else if (!lifeExists && !fragmentsExist) {
+                        // Просто звук удара, если ничего нет
+                        playMetalClankSound();
+                        shakeCamera(0.3);
                     }
                 }
 
-                // Звук удара стен
-                if (progress >= 0.99 && isCrushing && !hasClanked && !props.some(p => p.type === 'life')) {
-                    hasClanked = true;
-                    playMetalClankSound();
-                }
+                // Сплющивание жизни
+                props.forEach(p => {
+                    if (p.type === 'life' && p.stage === 0) {
+                        if (Math.abs(p.body.position.x) < 1.5) {
+                            const squashFactor = THREE.MathUtils.clamp(1 - (centerGap / p.originalSize.x), 0, 1);
+                            p.mesh.scale.x = Math.max(0.2, 1 - squashFactor * 0.7);
+                            p.mesh.scale.y = 1 + squashFactor * 0.2;
+                        }
+                    }
+                });
             }
 
             world.step(1/60, dt, 3);
@@ -482,6 +481,15 @@
                 const p = props[i];
                 p.mesh.position.copy(p.body.position);
                 p.mesh.quaternion.copy(p.body.quaternion);
+
+                if (p.type === 'fragment') {
+                    p.life -= dt;
+                    if (p.life <= 0) {
+                        scene.remove(p.mesh);
+                        world.removeBody(p.body);
+                        props.splice(i, 1);
+                    }
+                }
             }
 
             controls.update(); 
@@ -494,11 +502,8 @@
             renderer.render(scene, camera);
         }
 
-        // Вспомогательные функции
         let shakeTime = 0; let shakePower = 0;
         function shakeCamera(power) { shakePower = power; shakeTime = 0.2; }
-        function playPopSound() {}
-        function playSmashSound() {}
 
         animate();
 
