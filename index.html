@@ -3,45 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Гидравлический пресс: Куриное бедро</title>
+    <title>Гидравлический пресс: Финал</title>
     <style>
         body { margin:0; overflow:hidden; background:#0a0a0a; font-family:sans-serif; touch-action:none; user-select:none; }
         #canvas-container { width:100vw; height:100vh; display:block; }
-        
-        #ui-top {
-            position:absolute; top:20px; left:50%; transform:translateX(-50%);
-            display:flex; gap:10px; z-index:10; width:95%; justify-content:center; flex-wrap:wrap;
-        }
-        .spawn-btn {
-            padding:12px 20px; font-size:16px; font-weight:bold; color:#fff;
-            background:rgba(30,30,30,0.85); border:1px solid #555;
-            border-radius:12px; backdrop-filter:blur(5px); cursor:pointer;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.6);
-            transition: transform 0.1s;
-        }
+        #ui-top { position:absolute; top:20px; left:50%; transform:translateX(-50%); display:flex; gap:10px; z-index:10; width:95%; justify-content:center; flex-wrap:wrap; }
+        .spawn-btn { padding:12px 20px; font-size:16px; font-weight:bold; color:#fff; background:rgba(30,30,30,0.85); border:1px solid #555; border-radius:12px; backdrop-filter:blur(5px); cursor:pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.6); transition: transform 0.1s; }
         .spawn-btn:active { transform: scale(0.95); background:#444; }
-
-        #crush-btn {
-            position:absolute; bottom:30px; left:50%; transform:translateX(-50%);
-            padding:16px 50px; font-size:22px; font-weight:bold; color:#fff;
-            background:linear-gradient(135deg, #ff4757, #c0392b); border:none; border-radius:35px;
-            box-shadow:0 6px 20px rgba(255,71,87,0.5); cursor:pointer; z-index:10;
-            transition: transform 0.1s;
-        }
+        #crush-btn { position:absolute; bottom:30px; left:50%; transform:translateX(-50%); padding:16px 50px; font-size:22px; font-weight:bold; color:#fff; background:linear-gradient(135deg, #ff4757, #c0392b); border:none; border-radius:35px; box-shadow:0 6px 20px rgba(255,71,87,0.5); cursor:pointer; z-index:10; transition: transform 0.1s; }
         #crush-btn:active { transform:translateX(-50%) scale(0.95); }
         #crush-btn:disabled { background:#333; box-shadow:none; color:#777; }
-        
         #fps { position:absolute; top:80px; right:20px; color:#0f0; font-family:monospace; font-size:14px; background:rgba(0,0,0,0.6); padding:4px 8px; border-radius:5px; z-index:20; }
         #loading { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); color:#fff; font-size:18px; z-index:100; text-align:center; }
-        
-        #error-msg {
-            position:absolute; top:20%; left:50%; transform:translateX(-50%);
-            background:rgba(255,0,0,0.8); color:white; padding:15px; border-radius:10px;
-            font-size:16px; display:none; z-index:200; text-align:center; width:80%; pointer-events:none;
-            font-weight: bold;
-        }
+        #error-msg { position:absolute; top:20%; left:50%; transform:translateX(-50%); background:rgba(255,0,0,0.85); color:white; padding:15px; border-radius:10px; font-size:16px; display:none; z-index:200; text-align:center; width:80%; pointer-events:none; font-weight: bold; }
     </style>
-    
     <script type="importmap">
     {
         "imports": {
@@ -53,19 +28,16 @@
     </script>
 </head>
 <body>
-    <div id="loading">Загрузка пресса...</div>
+    <div id="loading">Загрузка...</div>
     <div id="error-msg">Ошибка загрузки</div>
     <div id="canvas-container"></div>
     <div id="fps">FPS: --</div>
-
     <div id="ui-top">
         <button class="spawn-btn" id="btn-balloon">🎈 Шарик</button>
         <button class="spawn-btn" id="btn-cooler">🥤 Кулер</button>
         <button class="spawn-btn" id="btn-custom">🍗 Куриное бедро</button>
     </div>
-
     <button id="crush-btn" disabled>ДАВИТЬ</button>
-
     <script type="module">
         import * as THREE from 'three';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -76,41 +48,22 @@
 
         // --- 1. АУДИО ---
         let audioCtx = null;
-        function initAudio() {
-            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        }
-
+        function initAudio() { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
         function playSquishSound() {
             if (!audioCtx) return;
-            const t = audioCtx.currentTime;
-            const osc = audioCtx.createOscillator(); const oscGain = audioCtx.createGain();
+            const t = audioCtx.currentTime; const osc = audioCtx.createOscillator(); const oscGain = audioCtx.createGain();
             osc.type = 'sine'; osc.frequency.setValueAtTime(200, t); osc.frequency.exponentialRampToValueAtTime(50, t + 0.3);
             oscGain.gain.setValueAtTime(0.5, t); oscGain.gain.exponentialRampToValueAtTime(0.01, t + 0.3);
             osc.connect(oscGain).connect(audioCtx.destination); osc.start(t); osc.stop(t + 0.3);
         }
-
         function playCrunchSound() {
             if (!audioCtx) return;
-            const t = audioCtx.currentTime;
-            const bufSize = audioCtx.sampleRate * 0.2;
-            const buffer = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
-            const data = buffer.getChannelData(0);
+            const t = audioCtx.currentTime; const bufSize = audioCtx.sampleRate * 0.2; const buffer = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate); const data = buffer.getChannelData(0);
             for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
-            const noise = audioCtx.createBufferSource(); noise.buffer = buffer;
-            const filter = audioCtx.createBiquadFilter(); filter.type = 'bandpass'; filter.frequency.value = 1000;
+            const noise = audioCtx.createBufferSource(); noise.buffer = buffer; const filter = audioCtx.createBiquadFilter(); filter.type = 'bandpass'; filter.frequency.value = 1000;
             const gain = audioCtx.createGain(); gain.gain.setValueAtTime(1, t); gain.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
             noise.connect(filter).connect(gain).connect(audioCtx.destination); noise.start(t);
         }
-
-        function playPopSound() {
-            if (!audioCtx) return;
-            const t = audioCtx.currentTime;
-            const osc = audioCtx.createOscillator(); const oscGain = audioCtx.createGain();
-            osc.type = 'sine'; osc.frequency.setValueAtTime(150, t); osc.frequency.exponentialRampToValueAtTime(40, t + 0.1);
-            oscGain.gain.setValueAtTime(1, t); oscGain.gain.exponentialRampToValueAtTime(0.01, t + 0.2);
-            osc.connect(oscGain).connect(audioCtx.destination); osc.start(t); osc.stop(t + 0.2);
-        }
-
         function playMetalClankSound() {
             if (!audioCtx) return;
             const t = audioCtx.currentTime;
@@ -124,382 +77,225 @@
 
         // --- 2. БАЗА ---
         const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); 
-        renderer.outputColorSpace = THREE.SRGBColorSpace;
-        renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        renderer.shadowMap.enabled = true;
-        renderer.shadowMap.type = THREE.PCFShadowMap; 
+        renderer.setSize(window.innerWidth, window.innerHeight); renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); 
+        renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap; 
         document.getElementById('canvas-container').appendChild(renderer.domElement);
 
-        const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x141414);
-        const pmrem = new THREE.PMREMGenerator(renderer);
-        scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-
+        const scene = new THREE.Scene(); scene.background = new THREE.Color(0x141414);
+        const pmrem = new THREE.PMREMGenerator(renderer); scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
         const camera = new THREE.PerspectiveCamera(50, window.innerWidth/window.innerHeight, 0.1, 100);
-        const controls = new OrbitControls(camera, renderer.domElement);
-        controls.enableDamping = true;
+        const controls = new OrbitControls(camera, renderer.domElement); controls.enableDamping = true;
 
         scene.add(new THREE.HemisphereLight(0xffffff, 0x333333, 1.0));
-        const dirLight = new THREE.DirectionalLight(0xffffff, 1.5); 
-        dirLight.position.set(5, 10, 7);
-        dirLight.castShadow = true;
-        dirLight.shadow.mapSize.width = 1024;
-        dirLight.shadow.mapSize.height = 1024;
-        dirLight.shadow.bias = -0.001;
-        scene.add(dirLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.5); dirLight.position.set(5, 10, 7); dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 1024; dirLight.shadow.mapSize.height = 1024; dirLight.shadow.bias = -0.001; scene.add(dirLight);
 
-        const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -20, 0) });
-        world.allowSleep = true; 
+        const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -20, 0) }); world.allowSleep = true; 
         const groundBody = new CANNON.Body({ mass: 0, shape: new CANNON.Plane() });
-        groundBody.quaternion.setFromEuler(-Math.PI/2, 0, 0);
-        groundBody.position.y = -1.5;
-        world.addBody(groundBody);
+        groundBody.quaternion.setFromEuler(-Math.PI/2, 0, 0); groundBody.position.y = -1.5; world.addBody(groundBody);
+        const groundMesh = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.9, metalness: 0.1 }));
+        groundMesh.rotation.x = -Math.PI/2; groundMesh.position.y = -1.5; groundMesh.receiveShadow = true; scene.add(groundMesh);
 
-        const groundMesh = new THREE.Mesh(
-            new THREE.PlaneGeometry(100, 100),
-            new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.9, metalness: 0.1 })
-        );
-        groundMesh.rotation.x = -Math.PI/2;
-        groundMesh.position.y = -1.5;
-        groundMesh.receiveShadow = true;
-        scene.add(groundMesh);
-
+        // --- 3. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ---
         let wallLeft, wallRight;
-        let isCrushing = false;
-        let progress = 0;
-        const SPEED = 6.0; 
+        let isCrushing = false; let progress = 0; const SPEED = 6.0; 
         let startX1, startX2, targetX1, targetX2;
-        const props = []; 
-        const clock = new THREE.Clock();
-        let hasClanked = false; 
-        
+        const props = []; const clock = new THREE.Clock();
+        let hasClanked = false; let isProcessing = false; // Защита от повторного срабатывания
         let kostyaModelTemplate = null; 
 
-        // Загрузка пресса
-        new GLTFLoader().load('./model.glb', (gltf) => {
-            const src = gltf.scene;
+        // --- 4. ЗАГРУЗКА ВСЕХ МОДЕЛЕЙ (Promise.all) ---
+        const loader = new GLTFLoader();
+        const dracoLoader = new DRACOLoader(); dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/'); loader.setDRACOLoader(dracoLoader);
+
+        const loadAsync = (url) => new Promise((res, rej) => loader.load(url, res, undefined, rej));
+
+        Promise.all([
+            loadAsync('./model.glb'),
+            loadAsync('./life.glb'),
+            loadAsync('./kostya.glb')
+        ]).then(([pressGltf, lifeGltf, kostyaGltf]) => {
+            // Настройка пресса
+            const src = pressGltf.scene;
             const box = new THREE.Box3().setFromObject(src);
-            const center = new THREE.Vector3(); box.getCenter(center);
-            src.position.sub(center);
-
+            const center = new THREE.Vector3(); box.getCenter(center); src.position.sub(center);
             src.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-
             wallLeft = new THREE.Group(); wallLeft.add(src); wallLeft.rotation.y = -Math.PI / 2; scene.add(wallLeft);
-            const clone = src.clone(true); 
-            clone.traverse(o => { if (o.isMesh && o.material) o.material = o.material.clone(); });
+            const clone = src.clone(true); clone.traverse(o => { if (o.isMesh && o.material) o.material = o.material.clone(); });
             wallRight = new THREE.Group(); wallRight.add(clone); wallRight.rotation.y = Math.PI / 2; scene.add(wallRight);
-
             const rotatedBox = new THREE.Box3().setFromObject(wallLeft);
-            const size = new THREE.Vector3(); rotatedBox.getSize(size);
-            const halfWidth = size.x / 2;
-
+            const size = new THREE.Vector3(); rotatedBox.getSize(size); const halfWidth = size.x / 2;
             targetX1 = -halfWidth - 0.05; targetX2 = halfWidth + 0.05;
             startX1 = -halfWidth - 3.5; startX2 = halfWidth + 3.5;
-
             wallLeft.position.set(startX1, 0, 0); wallRight.position.set(startX2, 0, 0);
             camera.position.set(0, 1, Math.max(size.y * 1.8, size.x * 4, 8)); controls.target.set(0, 0, 0);
 
+            // Настройка кости
+            kostyaModelTemplate = kostyaGltf.scene;
+            kostyaModelTemplate.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+
+            // Разблокируем UI
             document.getElementById('loading').style.display = 'none';
             document.getElementById('crush-btn').disabled = false;
-        }, undefined, (err) => {
+            document.getElementById('btn-balloon').disabled = false;
+            document.getElementById('btn-cooler').disabled = false;
+            document.getElementById('btn-custom').disabled = false;
+        }).catch(err => {
+            console.error(err);
             document.getElementById('loading').style.display = 'none';
             document.getElementById('error-msg').style.display = 'block';
-            document.getElementById('error-msg').innerHTML = 'ОШИБКА: Файл model.glb не найден!';
+            document.getElementById('error-msg').innerHTML = 'ОШИБКА загрузки 3D-моделей!<br>Проверьте наличие model.glb, life.glb и kostya.glb в папке.';
         });
 
-        // Предзагрузка кости
-        const loader = new GLTFLoader();
-        const dracoLoader = new DRACOLoader();
-        dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
-        loader.setDRACOLoader(dracoLoader);
-
-        loader.load('./kostya.glb', (gltf) => {
-            kostyaModelTemplate = gltf.scene;
-            kostyaModelTemplate.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-        }, undefined, () => {
-            console.warn("Файл kostya.glb не найден.");
-        });
-
-        // --- 3. КНОПКИ ---
+        // --- 5. КНОПКИ ---
         document.getElementById('crush-btn').addEventListener('click', () => {
-            initAudio();
-            isCrushing = !isCrushing;
-            hasClanked = false;
+            initAudio(); isCrushing = !isCrushing; hasClanked = false;
             document.getElementById('crush-btn').innerText = isCrushing ? 'РАЗДВИНУТЬ' : 'ДАВИТЬ';
         });
-
         document.getElementById('btn-balloon').onclick = () => { initAudio(); spawnBalloon(); };
         document.getElementById('btn-cooler').onclick = () => { initAudio(); spawnCooler(); };
         document.getElementById('btn-custom').onclick = () => { initAudio(); spawnLife(); };
 
-        // --- 4. СПАВН ОБЪЕКТОВ ---
+        // --- 6. СПАВН ОБЪЕКТОВ ---
         function spawnBalloon() {
-            const geo = new THREE.SphereGeometry(0.6, 32, 32);
-            const mat = new THREE.MeshStandardMaterial({ color: 0xff2222, roughness: 0.1, metalness: 0.2 });
-            const mesh = new THREE.Mesh(geo, mat);
-            mesh.castShadow = true; scene.add(mesh);
-            const body = new CANNON.Body({ mass: 0.1, shape: new CANNON.Sphere(0.6) });
-            body.position.set(0, 4, 0);
-            world.addBody(body);
+            const geo = new THREE.SphereGeometry(0.6, 32, 32); const mat = new THREE.MeshStandardMaterial({ color: 0xff2222, roughness: 0.1, metalness: 0.2 });
+            const mesh = new THREE.Mesh(geo, mat); mesh.castShadow = true; scene.add(mesh);
+            const body = new CANNON.Body({ mass: 0.1, shape: new CANNON.Sphere(0.6) }); body.position.set(0, 4, 0); world.addBody(body);
             props.push({ mesh, body, type: 'balloon' });
         }
-
         function spawnCooler() {
             const group = new THREE.Group();
-            const waterMat = new THREE.MeshStandardMaterial({ color: 0x00aaff, transparent: true, opacity: 0.8 });
-            group.add(new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 1.4, 16), waterMat));
-            const plasticMat = new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 0.4 });
-            const plasticMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 1.5, 16), plasticMat);
-            plasticMesh.castShadow = true; group.add(plasticMesh);
-            scene.add(group);
-            const body = new CANNON.Body({ mass: 2.0, shape: new CANNON.Cylinder(0.5, 0.5, 1.5, 16) });
-            body.position.set(0, 4, 0);
-            world.addBody(body);
+            group.add(new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 1.4, 16), new THREE.MeshStandardMaterial({ color: 0x00aaff, transparent: true, opacity: 0.8 })));
+            const plasticMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 1.5, 16), new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 0.4 }));
+            plasticMesh.castShadow = true; group.add(plasticMesh); scene.add(group);
+            const body = new CANNON.Body({ mass: 2.0, shape: new CANNON.Cylinder(0.5, 0.5, 1.5, 16) }); body.position.set(0, 4, 0); world.addBody(body);
             props.push({ mesh: group, body, type: 'cooler' });
         }
 
         function spawnLife() {
-            const errorDiv = document.getElementById('error-msg');
-            errorDiv.style.display = 'none';
-
-            loader.load('./life.glb', (gltf) => {
+            if (!kostyaModelTemplate) return; // Проверка, что модели загружены
+            const errorDiv = document.getElementById('error-msg'); errorDiv.style.display = 'none';
+            loadAsync('./life.glb').then(gltf => {
                 const model = gltf.scene;
                 const box = new THREE.Box3().setFromObject(model);
-                const size = new THREE.Vector3(); box.getSize(size);
-                const center = new THREE.Vector3(); box.getCenter(center);
-                model.position.sub(center);
-
+                const size = new THREE.Vector3(); box.getSize(size); const center = new THREE.Vector3(); box.getCenter(center); model.position.sub(center);
                 const maxDim = Math.max(size.x, size.y, size.z);
-                if (maxDim > 0) {
-                    const scale = 1.2 / maxDim;
-                    model.scale.set(scale, scale, scale);
-                    size.multiplyScalar(scale);
-                }
-
-                const group = new THREE.Group();
-                group.add(model);
-                scene.add(group);
-
-                // Спавним ровно на полу, без падения
+                if (maxDim > 0) { const scale = 1.2 / maxDim; model.scale.set(scale, scale, scale); size.multiplyScalar(scale); }
+                const group = new THREE.Group(); group.add(model); scene.add(group);
                 const spawnY = -1.5 + size.y / 2;
                 const body = new CANNON.Body({ mass: 2.0, shape: new CANNON.Box(new CANNON.Vec3(size.x/2, size.y/2, size.z/2)) });
                 body.position.set(0, spawnY, 0);
-                body.fixedRotation = true; 
-                body.updateMassProperties();
+                body.fixedRotation = true; body.angularFactor.set(0, 0, 0); body.updateMassProperties();
                 world.addBody(body);
-
-                props.push({ 
-                    mesh: group, 
-                    body, 
-                    type: 'life', 
-                    originalSize: size.clone(),
-                    stage: 0 
-                });
-
-            }, undefined, (err) => {
-                errorDiv.style.display = 'block';
-                errorDiv.innerHTML = 'ОШИБКА: Файл life.glb не найден!';
+                props.push({ mesh: group, body, type: 'life', originalSize: size.clone(), stage: 0 });
+            }).catch(err => {
+                errorDiv.style.display = 'block'; errorDiv.innerHTML = 'ОШИБКА: Файл life.glb не найден!';
             });
         }
 
-        // --- 5. КРОВЬ И РАЗРУШЕНИЕ ---
+        // --- 7. КРОВЬ И РАЗРУШЕНИЕ ---
         function spawnBloodDrops(pos, count = 30, speed = 10) {
-            const geo = new THREE.BufferGeometry();
-            const positions = new Float32Array(count * 3);
-            const velocities = [];
-            for(let i=0; i<count; i++) {
-                positions[i*3] = pos.x; positions[i*3+1] = pos.y; positions[i*3+2] = pos.z;
-                velocities.push(new THREE.Vector3((Math.random()-0.5)*speed, Math.random()*speed, (Math.random()-0.5)*speed));
-            }
+            const geo = new THREE.BufferGeometry(); const positions = new Float32Array(count * 3); const velocities = [];
+            for(let i=0; i<count; i++) { positions[i*3] = pos.x; positions[i*3+1] = pos.y; positions[i*3+2] = pos.z; velocities.push(new THREE.Vector3((Math.random()-0.5)*speed, Math.random()*speed, (Math.random()-0.5)*speed)); }
             geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
             const mat = new THREE.PointsMaterial({ color: 0x990000, size: 0.08, transparent: true });
-            const particles = new THREE.Points(geo, mat);
-            scene.add(particles);
-            
+            const particles = new THREE.Points(geo, mat); scene.add(particles);
             let life = 0;
             const tick = () => {
-                life += 0.02;
-                const arr = geo.attributes.position.array;
-                for(let i=0; i<count; i++) {
-                    velocities[i].y -= 25 * 0.02;
-                    arr[i*3] += velocities[i].x * 0.02;
-                    arr[i*3+1] += velocities[i].y * 0.02;
-                    arr[i*3+2] += velocities[i].z * 0.02;
-                    if (arr[i*3+1] < -1.5) { arr[i*3+1] = -1.5; velocities[i].set(0,0,0); } 
-                }
-                geo.attributes.position.needsUpdate = true;
-                mat.opacity = Math.max(0, 1 - life * 0.5);
-                if(life < 2) requestAnimationFrame(tick);
-                else { scene.remove(particles); geo.dispose(); mat.dispose(); }
+                life += 0.02; const arr = geo.attributes.position.array;
+                for(let i=0; i<count; i++) { velocities[i].y -= 25 * 0.02; arr[i*3] += velocities[i].x * 0.02; arr[i*3+1] += velocities[i].y * 0.02; arr[i*3+2] += velocities[i].z * 0.02; if (arr[i*3+1] < -1.5) { arr[i*3+1] = -1.5; velocities[i].set(0,0,0); } }
+                geo.attributes.position.needsUpdate = true; mat.opacity = Math.max(0, 1 - life * 0.5);
+                if(life < 2) requestAnimationFrame(tick); else { scene.remove(particles); geo.dispose(); mat.dispose(); }
             };
             tick();
         }
 
         function addBloodStain(pos, normal, parent) {
             const geo = new THREE.CircleGeometry(Math.random() * 0.4 + 0.2, 16);
-            const mat = new THREE.MeshBasicMaterial({ color: 0x660000, transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide });
-            const stain = new THREE.Mesh(geo, mat);
-            stain.position.copy(pos);
-            
+            const mat = new THREE.MeshBasicMaterial({ color: 0x660000, transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
+            const stain = new THREE.Mesh(geo, mat); stain.position.copy(pos);
             if (normal.equals(new THREE.Vector3(0, 1, 0))) { stain.rotation.x = -Math.PI / 2; stain.position.y += 0.01; }
             else if (normal.equals(new THREE.Vector3(1, 0, 0))) { stain.rotation.y = Math.PI / 2; stain.position.x += 0.01; }
             else if (normal.equals(new THREE.Vector3(-1, 0, 0))) { stain.rotation.y = -Math.PI / 2; stain.position.x -= 0.01; }
-
+            stain.renderOrder = 1;
             parent.add(stain);
         }
 
-        // --- 6. ЛОГИКА СТАДИЙ ---
+        // --- 8. ЛОГИКА СТАДИЙ (с защитой isProcessing) ---
         function handleLifeCrush(prop) {
+            if (isProcessing) return; isProcessing = true;
             if (prop.stage === 0) {
-                // ЭТАП 1: Сжатие
-                prop.stage = 1;
-                playSquishSound();
-                shakeCamera(0.2);
+                prop.stage = 1; playSquishSound(); shakeCamera(0.2);
                 spawnBloodDrops(prop.body.position, 40, 8);
                 addBloodStain(new THREE.Vector3(wallLeft.position.x + 1.5, 0, 0), new THREE.Vector3(1, 0, 0), scene);
                 addBloodStain(new THREE.Vector3(wallRight.position.x - 1.5, 0, 0), new THREE.Vector3(-1, 0, 0), scene);
-                
             } else if (prop.stage === 1) {
-                // ЭТАП 2: Разрыв на мясо
-                playCrunchSound();
-                shakeCamera(0.5);
+                playCrunchSound(); shakeCamera(0.5);
                 const pos = prop.body.position;
-                
-                scene.remove(prop.mesh);
-                world.removeBody(prop.body);
-                const idx = props.indexOf(prop);
-                if (idx > -1) props.splice(idx, 1);
-
+                scene.remove(prop.mesh); world.removeBody(prop.body); const idx = props.indexOf(prop); if (idx > -1) props.splice(idx, 1);
                 spawnBloodDrops(pos, 100, 15);
-                for(let i=0; i<5; i++) {
-                    addBloodStain(new THREE.Vector3((Math.random()-0.5)*2, -1.49, (Math.random()-0.5)*2), new THREE.Vector3(0, 1, 0), scene);
-                }
-
+                for(let i=0; i<5; i++) { addBloodStain(new THREE.Vector3((Math.random()-0.5)*2, -1.49, (Math.random()-0.5)*2), new THREE.Vector3(0, 1, 0), scene); }
                 for (let i = 0; i < 20; i++) {
                     const size = Math.random() * 0.15 + 0.05;
-                    const fragMesh = new THREE.Mesh(new THREE.SphereGeometry(size, 8, 8), new THREE.MeshStandardMaterial({ color: 0xcc1111, roughness: 0.6 }));
-                    fragMesh.castShadow = true; scene.add(fragMesh);
-
-                    const fragBody = new CANNON.Body({ mass: 0.1, shape: new CANNON.Sphere(size) });
-                    fragBody.position.set(pos.x + (Math.random()-0.5)*0.4, pos.y + (Math.random()-0.5)*0.4, pos.z + (Math.random()-0.5)*0.4);
-                    fragBody.velocity.set((Math.random()-0.5)*10, Math.random()*8 + 2, (Math.random()-0.5)*10);
-                    world.addBody(fragBody);
-
+                    const fragMesh = new THREE.Mesh(new THREE.SphereGeometry(size, 8, 8), new THREE.MeshStandardMaterial({ color: 0xcc1111, roughness: 0.6 })); fragMesh.castShadow = true; scene.add(fragMesh);
+                    const fragBody = new CANNON.Body({ mass: 0.1, shape: new CANNON.Sphere(size) }); fragBody.position.set(pos.x + (Math.random()-0.5)*0.4, pos.y + (Math.random()-0.5)*0.4, pos.z + (Math.random()-0.5)*0.4);
+                    fragBody.velocity.set((Math.random()-0.5)*10, Math.random()*8 + 2, (Math.random()-0.5)*10); world.addBody(fragBody);
                     props.push({ mesh: fragMesh, body: fragBody, type: 'fragment', life: 10.0 });
                 }
             }
+            setTimeout(() => { isProcessing = false; }, 100); // Пауза для защиты от быстрых кликов
         }
 
-        // --- 7. ЦИКЛ ---
-        let frames = 0;
-        let lastTime = performance.now();
-
+        // --- 9. ЦИКЛ ---
+        let frames = 0; let lastTime = performance.now();
         function animate() {
             requestAnimationFrame(animate);
-            const dt = Math.min(clock.getDelta(), 0.05);
-
-            frames++;
-            const now = performance.now();
-            if (now - lastTime > 1000) {
-                document.getElementById('fps').innerText = `FPS: ${frames}`;
-                frames = 0; lastTime = now;
-            }
+            const dt = Math.min(clock.getDelta(), 1/30); // Жесткое ограничение dt
+            frames++; const now = performance.now();
+            if (now - lastTime > 1000) { document.getElementById('fps').innerText = `FPS: ${frames}`; frames = 0; lastTime = now; }
 
             if (wallLeft && wallRight) {
-                if (isCrushing) progress = Math.min(progress + dt * SPEED, 1);
-                else progress = Math.max(progress - dt * SPEED, 0);
+                if (isCrushing) progress = Math.min(progress + dt * SPEED, 1); else progress = Math.max(progress - dt * SPEED, 0);
+                wallLeft.position.x = THREE.MathUtils.lerp(startX1, targetX1, progress); wallRight.position.x = THREE.MathUtils.lerp(startX2, targetX2, progress);
+                const currentGap = wallRight.position.x - wallLeft.position.x; const centerGap = currentGap - (targetX2 - targetX1); 
 
-                wallLeft.position.x = THREE.MathUtils.lerp(startX1, targetX1, progress);
-                wallRight.position.x = THREE.MathUtils.lerp(startX2, targetX2, progress);
-                
-                const currentGap = wallRight.position.x - wallLeft.position.x;
-                const centerGap = currentGap - (targetX2 - targetX1); 
-
-                // Логика при полном сжатии
                 if (progress >= 0.99 && isCrushing && !hasClanked) {
                     hasClanked = true;
-                    
-                    const lifeExists = props.some(p => p.type === 'life');
-                    const fragmentsExist = props.some(p => p.type === 'fragment');
-                    
-                    if (lifeExists) {
-                        const lifeProp = props.find(p => p.type === 'life');
-                        handleLifeCrush(lifeProp);
-                    } else if (fragmentsExist) {
+                    const lifeExists = props.some(p => p.type === 'life'); const fragmentsExist = props.some(p => p.type === 'fragment');
+                    if (lifeExists) { const lifeProp = props.find(p => p.type === 'life'); handleLifeCrush(lifeProp); } 
+                    else if (fragmentsExist) {
                         if (kostyaModelTemplate) {
-                            // ЭТАП 3: Появление кости
                             playMetalClankSound();
-                            for (let i = props.length - 1; i >= 0; i--) {
-                                if (props[i].type === 'fragment') {
-                                    scene.remove(props[i].mesh);
-                                    world.removeBody(props[i].body);
-                                    props.splice(i, 1);
-                                }
-                            }
-                            
-                            const bone = kostyaModelTemplate.clone();
-                            const bBox = new THREE.Box3().setFromObject(bone);
-                            const bCenter = new THREE.Vector3(); bBox.getCenter(bCenter);
-                            bone.position.sub(bCenter);
-                            
-                            const group = new THREE.Group();
-                            group.add(bone);
-                            scene.add(group);
-
+                            for (let i = props.length - 1; i >= 0; i--) { if (props[i].type === 'fragment') { scene.remove(props[i].mesh); world.removeBody(props[i].body); props.splice(i, 1); } }
+                            const bone = kostyaModelTemplate.clone(); const bBox = new THREE.Box3().setFromObject(bone); const bCenter = new THREE.Vector3(); bBox.getCenter(bCenter); bone.position.sub(bCenter);
+                            const group = new THREE.Group(); group.add(bone); scene.add(group);
                             const bBody = new CANNON.Body({ mass: 1.0, shape: new CANNON.Box(new CANNON.Vec3(0.5, 0.5, 0.5)) });
-                            bBody.position.set(0, -1.0, 0);
-                            bBody.fixedRotation = true;
-                            world.addBody(bBody);
-
+                            bBody.position.set(0, -1.0, 0); bBody.fixedRotation = true; bBody.angularFactor.set(0, 0, 0); bBody.updateMassProperties(); world.addBody(bBody);
                             props.push({ mesh: group, body: bBody, type: 'bone' });
-                        } else {
-                            document.getElementById('error-msg').style.display = 'block';
-                            document.getElementById('error-msg').innerHTML = 'ОШИБКА: Файл kostya.glb не загружен!<br>Кость не может появиться.';
-                        }
-                    } else {
-                        playMetalClankSound();
-                        shakeCamera(0.3);
-                    }
+                        } else { document.getElementById('error-msg').style.display = 'block'; document.getElementById('error-msg').innerHTML = 'ОШИБКА: Файл kostya.glb не загружен!'; }
+                    } else { playMetalClankSound(); shakeCamera(0.3); }
                 }
 
-                // Сплющивание жизни
                 props.forEach(p => {
                     if (p.type === 'life' && p.stage === 0) {
                         if (Math.abs(p.body.position.x) < 1.5) {
                             const squashFactor = THREE.MathUtils.clamp(1 - (centerGap / p.originalSize.x), 0, 1);
-                            p.mesh.scale.x = Math.max(0.2, 1 - squashFactor * 0.7);
-                            p.mesh.scale.y = 1 + squashFactor * 0.2;
+                            p.mesh.scale.x = Math.max(0.2, 1 - squashFactor * 0.7); p.mesh.scale.y = 1 + squashFactor * 0.2;
                         }
                     }
                 });
             }
 
-            world.step(1/60, dt, 3);
+            world.step(1/60, dt, 3); // Фиксированный шаг с интерполяцией
 
             for (let i = props.length - 1; i >= 0; i--) {
-                const p = props[i];
-                p.mesh.position.copy(p.body.position);
-                p.mesh.quaternion.copy(p.body.quaternion);
-
-                if (p.type === 'fragment') {
-                    p.life -= dt;
-                    if (p.life <= 0) {
-                        scene.remove(p.mesh);
-                        world.removeBody(p.body);
-                        props.splice(i, 1);
-                    }
-                }
+                const p = props[i]; p.mesh.position.copy(p.body.position); p.mesh.quaternion.copy(p.body.quaternion);
+                if (p.type === 'fragment') { p.life -= dt; if (p.life <= 0) { scene.remove(p.mesh); world.removeBody(p.body); props.splice(i, 1); } }
             }
 
             controls.update(); 
-            if (shakeTime > 0) {
-                shakeTime -= dt;
-                camera.position.x += (Math.random() - 0.5) * shakePower;
-                camera.position.y += (Math.random() - 0.5) * shakePower;
-            }
-
+            if (shakeTime > 0) { shakeTime -= dt; camera.position.x += (Math.random() - 0.5) * shakePower; camera.position.y += (Math.random() - 0.5) * shakePower; }
             renderer.render(scene, camera);
         }
 
@@ -509,9 +305,7 @@
         animate();
 
         window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth/window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
+            camera.aspect = window.innerWidth/window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight);
         });
     </script>
 </body>
