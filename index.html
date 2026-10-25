@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Гидравлический пресс: Идеал + Звук</title>
+    <title>Гидравлический пресс: Кастомная модель</title>
     <style>
         body { margin:0; overflow:hidden; background:#0a0a0a; font-family:sans-serif; touch-action:none; user-select:none; }
         #canvas-container { width:100vw; height:100vh; display:block; }
@@ -53,6 +53,7 @@
     <div id="ui-top">
         <button class="spawn-btn" id="btn-balloon">🎈 Шарик</button>
         <button class="spawn-btn" id="btn-cooler">🥤 Кулер</button>
+        <button class="spawn-btn" id="btn-custom">🧊 life.glb</button>
     </div>
 
     <button id="crush-btn" disabled>ДАВИТЬ</button>
@@ -64,140 +65,78 @@
         import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
         import * as CANNON from 'cannon-es';
 
-        // --- 1. АУДИО СИСТЕМА (Web Audio API) ---
+        // --- 1. АУДИО СИСТЕМА ---
         let audioCtx = null;
-
-        // Инициализация звука (вызывается при первом клике)
         function initAudio() {
-            if (!audioCtx) {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            }
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         }
 
-        // Звук лопающегося шарика
         function playPopSound() {
             if (!audioCtx) return;
             const t = audioCtx.currentTime;
-
-            // 1. Резкий хлопок (шум)
             const bufferSize = audioCtx.sampleRate * 0.1;
             const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
             const data = buffer.getChannelData(0);
             for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
-            
-            const noise = audioCtx.createBufferSource();
-            noise.buffer = buffer;
-            const noiseFilter = audioCtx.createBiquadFilter();
-            noiseFilter.type = 'highpass';
-            noiseFilter.frequency.value = 800;
-            const noiseGain = audioCtx.createGain();
-            noiseGain.gain.setValueAtTime(1, t);
-            noiseGain.gain.exponentialRampToValueAtTime(0.01, t + 0.1);
-            
-            noise.connect(noiseFilter).connect(noiseGain).connect(audioCtx.destination);
-            noise.start(t);
+            const noise = audioCtx.createBufferSource(); noise.buffer = buffer;
+            const filter = audioCtx.createBiquadFilter(); filter.type = 'highpass'; filter.frequency.value = 800;
+            const gain = audioCtx.createGain(); gain.gain.setValueAtTime(1, t); gain.gain.exponentialRampToValueAtTime(0.01, t + 0.1);
+            noise.connect(filter).connect(gain).connect(audioCtx.destination); noise.start(t);
 
-            // 2. Низкий бас (упругость резины)
-            const osc = audioCtx.createOscillator();
-            const oscGain = audioCtx.createGain();
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(150, t);
-            osc.frequency.exponentialRampToValueAtTime(40, t + 0.1);
-            oscGain.gain.setValueAtTime(1, t);
-            oscGain.gain.exponentialRampToValueAtTime(0.01, t + 0.2);
-            
-            osc.connect(oscGain).connect(audioCtx.destination);
-            osc.start(t);
-            osc.stop(t + 0.2);
+            const osc = audioCtx.createOscillator(); const oscGain = audioCtx.createGain();
+            osc.type = 'sine'; osc.frequency.setValueAtTime(150, t); osc.frequency.exponentialRampToValueAtTime(40, t + 0.1);
+            oscGain.gain.setValueAtTime(1, t); oscGain.gain.exponentialRampToValueAtTime(0.01, t + 0.2);
+            osc.connect(oscGain).connect(audioCtx.destination); osc.start(t); osc.stop(t + 0.2);
         }
 
-        // Звук разбивающегося кулера (пластик + вода)
         function playSmashSound() {
             if (!audioCtx) return;
             const t = audioCtx.currentTime;
-
-            // 1. Хруст пластика (шум высоких частот)
-            const bufSize1 = audioCtx.sampleRate * 0.3;
-            const buffer1 = audioCtx.createBuffer(1, bufSize1, audioCtx.sampleRate);
-            const data1 = buffer1.getChannelData(0);
-            for (let i = 0; i < bufSize1; i++) data1[i] = Math.random() * 2 - 1;
+            const bufSize = audioCtx.sampleRate * 0.5;
+            const buffer = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+            const noise = audioCtx.createBufferSource(); noise.buffer = buffer;
+            const filter = audioCtx.createBiquadFilter(); filter.type = 'lowpass'; filter.frequency.value = 600;
+            const gain = audioCtx.createGain(); gain.gain.setValueAtTime(0.8, t); gain.gain.exponentialRampToValueAtTime(0.01, t + 0.4);
+            noise.connect(filter).connect(gain).connect(audioCtx.destination); noise.start(t);
             
-            const noise1 = audioCtx.createBufferSource();
-            noise1.buffer = buffer1;
-            const filter1 = audioCtx.createBiquadFilter();
-            filter1.type = 'bandpass';
-            filter1.frequency.value = 2000; // Хрусткий пластик
-            const gain1 = audioCtx.createGain();
-            gain1.gain.setValueAtTime(0.8, t);
-            gain1.gain.exponentialRampToValueAtTime(0.01, t + 0.2);
-            
-            noise1.connect(filter1).connect(gain1).connect(audioCtx.destination);
-            noise1.start(t);
-
-            // 2. Разлив воды (шум низких частот)
-            const bufSize2 = audioCtx.sampleRate * 0.8;
-            const buffer2 = audioCtx.createBuffer(1, bufSize2, audioCtx.sampleRate);
-            const data2 = buffer2.getChannelData(0);
-            for (let i = 0; i < bufSize2; i++) data2[i] = Math.random() * 2 - 1;
-
-            const noise2 = audioCtx.createBufferSource();
-            noise2.buffer = buffer2;
-            const filter2 = audioCtx.createBiquadFilter();
-            filter2.type = 'lowpass';
-            filter2.frequency.value = 400; // Глухой звук воды
-            const gain2 = audioCtx.createGain();
-            gain2.gain.setValueAtTime(0.6, t);
-            gain2.gain.exponentialRampToValueAtTime(0.01, t + 0.7);
-            
-            noise2.connect(filter2).connect(gain2).connect(audioCtx.destination);
-            noise2.start(t);
-
-            // 3. Тяжелый удар
-            const osc = audioCtx.createOscillator();
-            const oscGain = audioCtx.createGain();
-            osc.type = 'square';
-            osc.frequency.setValueAtTime(80, t);
-            osc.frequency.exponentialRampToValueAtTime(20, t + 0.2);
-            oscGain.gain.setValueAtTime(1, t);
-            oscGain.gain.exponentialRampToValueAtTime(0.01, t + 0.3);
-            
-            osc.connect(oscGain).connect(audioCtx.destination);
-            osc.start(t);
-            osc.stop(t + 0.3);
+            const osc = audioCtx.createOscillator(); const oscGain = audioCtx.createGain();
+            osc.type = 'square'; osc.frequency.setValueAtTime(80, t); osc.frequency.exponentialRampToValueAtTime(20, t + 0.2);
+            oscGain.gain.setValueAtTime(1, t); oscGain.gain.exponentialRampToValueAtTime(0.01, t + 0.3);
+            osc.connect(oscGain).connect(audioCtx.destination); osc.start(t); osc.stop(t + 0.3);
         }
 
-        // Звук смыкания металлических стен
+        // Звук хруста для кастомной модели
+        function playCrunchSound() {
+            if (!audioCtx) return;
+            const t = audioCtx.currentTime;
+            const bufSize = audioCtx.sampleRate * 0.2;
+            const buffer = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+            
+            const noise = audioCtx.createBufferSource(); noise.buffer = buffer;
+            const filter = audioCtx.createBiquadFilter(); filter.type = 'bandpass'; filter.frequency.value = 1500;
+            const gain = audioCtx.createGain(); gain.gain.setValueAtTime(1, t); gain.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
+            noise.connect(filter).connect(gain).connect(audioCtx.destination); noise.start(t);
+
+            const osc = audioCtx.createOscillator(); const oscGain = audioCtx.createGain();
+            osc.type = 'triangle'; osc.frequency.setValueAtTime(120, t); osc.frequency.exponentialRampToValueAtTime(30, t + 0.2);
+            oscGain.gain.setValueAtTime(0.8, t); oscGain.gain.exponentialRampToValueAtTime(0.01, t + 0.2);
+            osc.connect(oscGain).connect(audioCtx.destination); osc.start(t); osc.stop(t + 0.2);
+        }
+
         function playMetalClankSound() {
             if (!audioCtx) return;
             const t = audioCtx.currentTime;
-
-            // Металлический звон (несколько высоких частот)
-            const freqs = [800, 1200, 1500];
-            freqs.forEach((freq, index) => {
-                const osc = audioCtx.createOscillator();
-                const gain = audioCtx.createGain();
-                osc.type = 'triangle';
-                osc.frequency.setValueAtTime(freq, t);
-                gain.gain.setValueAtTime(0.15 - index * 0.03, t);
-                gain.gain.exponentialRampToValueAtTime(0.01, t + 0.4);
-                osc.connect(gain).connect(audioCtx.destination);
-                osc.start(t);
-                osc.stop(t + 0.4);
+            [800, 1200, 1500].forEach((freq, i) => {
+                const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
+                osc.type = 'triangle'; osc.frequency.setValueAtTime(freq, t);
+                gain.gain.setValueAtTime(0.15 - i * 0.03, t); gain.gain.exponentialRampToValueAtTime(0.01, t + 0.4);
+                osc.connect(gain).connect(audioCtx.destination); osc.start(t); osc.stop(t + 0.4);
             });
-
-            // Низкий удар
-            const bassOsc = audioCtx.createOscillator();
-            const bassGain = audioCtx.createGain();
-            bassOsc.type = 'sine';
-            bassOsc.frequency.setValueAtTime(100, t);
-            bassOsc.frequency.exponentialRampToValueAtTime(30, t + 0.3);
-            bassGain.gain.setValueAtTime(1, t);
-            bassGain.gain.exponentialRampToValueAtTime(0.01, t + 0.5);
-            bassOsc.connect(bassGain).connect(audioCtx.destination);
-            bassOsc.start(t);
-            bassOsc.stop(t + 0.5);
         }
-
 
         // --- 2. Рендерер и Сцена ---
         const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -205,14 +144,12 @@
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); 
         renderer.outputColorSpace = THREE.SRGBColorSpace;
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        renderer.toneMappingExposure = 1.0;
         renderer.shadowMap.enabled = true;
         renderer.shadowMap.type = THREE.PCFShadowMap; 
         document.getElementById('canvas-container').appendChild(renderer.domElement);
 
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x141414);
-        
         const pmrem = new THREE.PMREMGenerator(renderer);
         scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
@@ -237,7 +174,6 @@
         // --- 4. Физический мир ---
         const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -20, 0) });
         world.allowSleep = true; 
-
         const groundBody = new CANNON.Body({ mass: 0, shape: new CANNON.Plane() });
         groundBody.quaternion.setFromEuler(-Math.PI/2, 0, 0);
         groundBody.position.y = -1.5;
@@ -260,7 +196,7 @@
         let startX1, startX2, targetX1, targetX2;
         const props = []; 
         const clock = new THREE.Clock();
-        let hasClanked = false; // Флаг для звука удара стен
+        let hasClanked = false; 
 
         // --- 6. Загрузка пресса ---
         new GLTFLoader().load('./model.glb', (gltf) => {
@@ -272,7 +208,6 @@
             src.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
 
             wallLeft = new THREE.Group(); wallLeft.add(src); wallLeft.rotation.y = -Math.PI / 2; scene.add(wallLeft);
-
             const clone = src.clone(true); 
             clone.traverse(o => { if (o.isMesh && o.material) o.material = o.material.clone(); });
             wallRight = new THREE.Group(); wallRight.add(clone); wallRight.rotation.y = Math.PI / 2; scene.add(wallRight);
@@ -284,12 +219,10 @@
             targetX1 = -halfWidth - 0.05; targetX2 = halfWidth + 0.05;
             startX1 = -halfWidth - 3.5; startX2 = halfWidth + 3.5;
 
-            wallLeft.position.set(startX1, 0, 0); 
-            wallRight.position.set(startX2, 0, 0);
+            wallLeft.position.set(startX1, 0, 0); wallRight.position.set(startX2, 0, 0);
 
             const camDist = Math.max(size.y * 1.8, size.x * 4, 8);
-            camera.position.set(0, 1, camDist); 
-            controls.target.set(0, 0, 0);
+            camera.position.set(0, 1, camDist); controls.target.set(0, 0, 0);
 
             document.getElementById('loading').style.display = 'none';
             document.getElementById('crush-btn').disabled = false;
@@ -297,20 +230,20 @@
 
         // --- 7. Кнопки ---
         document.getElementById('crush-btn').addEventListener('click', () => {
-            initAudio(); // Включаем звук при первом клике
+            initAudio();
             isCrushing = !isCrushing;
-            hasClanked = false; // Сбрасываем флаг удара
+            hasClanked = false;
             document.getElementById('crush-btn').innerText = isCrushing ? 'РАЗДВИНУТЬ' : 'ДАВИТЬ';
         });
 
         document.getElementById('btn-balloon').onclick = () => { initAudio(); spawnBalloon(); };
         document.getElementById('btn-cooler').onclick = () => { initAudio(); spawnCooler(); };
+        document.getElementById('btn-custom').onclick = () => { initAudio(); spawnCustomModel(); };
 
         // --- 8. Спавн ---
         function spawnBalloon() {
             const geo = new THREE.SphereGeometry(0.6, 32, 32);
             const mat = new THREE.MeshStandardMaterial({ color: 0xff2222, roughness: 0.1, metalness: 0.2 });
-
             mat.onBeforeCompile = (shader) => {
                 shader.uniforms.uSquash = { value: 0.0 }; 
                 shader.vertexShader = `uniform float uSquash;\n${shader.vertexShader}`.replace(
@@ -318,49 +251,82 @@
                     `#include <begin_vertex>
                     float squash = 1.0 - uSquash * 0.8;
                     float stretch = 1.0 + uSquash * 0.4;
-                    transformed.x *= squash;
-                    transformed.y *= stretch;
-                    transformed.z *= stretch;
-                    `
+                    transformed.x *= squash; transformed.y *= stretch; transformed.z *= stretch;`
                 );
                 mat.userData.shader = shader;
             };
-
             const mesh = new THREE.Mesh(geo, mat);
             mesh.castShadow = true; mesh.receiveShadow = true; scene.add(mesh);
-
             const body = new CANNON.Body({ mass: 0.1, shape: new CANNON.Sphere(0.6) });
             body.position.set(0, 4, 0);
             body.angularVelocity.set(Math.random(), Math.random(), Math.random());
             world.addBody(body);
-
             props.push({ mesh, body, type: 'balloon', radius: 0.6 });
         }
 
         function spawnCooler() {
             const group = new THREE.Group();
-            
-            const waterMat = new THREE.MeshStandardMaterial({ color: 0x00aaff, transparent: true, opacity: 0.8, roughness: 0.1 });
-            group.add(new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 1.4, 16), waterMat));
-
-            const plasticMat = new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 0.4, metalness: 0.1 });
-            const plasticMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 1.5, 16), plasticMat);
-            plasticMesh.castShadow = true;
-            group.add(plasticMesh);
+            group.add(new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 1.4, 16), new THREE.MeshStandardMaterial({ color: 0x00aaff, transparent: true, opacity: 0.8, roughness: 0.1 })));
+            const plasticMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 1.5, 16), new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 0.4, metalness: 0.1 }));
+            plasticMesh.castShadow = true; group.add(plasticMesh);
             scene.add(group);
-
-            const shape = new CANNON.Cylinder(0.5, 0.5, 1.5, 16);
-            const body = new CANNON.Body({ mass: 2.0, shape });
+            const body = new CANNON.Body({ mass: 2.0, shape: new CANNON.Cylinder(0.5, 0.5, 1.5, 16) });
             body.position.set(0, 4, 0);
             world.addBody(body);
-
             props.push({ mesh: group, body, type: 'cooler', radius: 0.5 });
+        }
+
+        // ФУНКЦИЯ ЗАГРУЗКИ ВАШЕЙ МОДЕЛИ
+        function spawnCustomModel() {
+            const loader = new GLTFLoader();
+            // Загружаем life.glb (убедитесь, что файл лежит в одной папке с index.html)
+            loader.load('./life.glb', (gltf) => {
+                const model = gltf.scene;
+
+                // 1. Вычисляем размеры и центрируем
+                const box = new THREE.Box3().setFromObject(model);
+                const size = new THREE.Vector3(); box.getSize(size);
+                const center = new THREE.Vector3(); box.getCenter(center);
+                model.position.sub(center);
+
+                // 2. Автомасштабирование (если модель огромная, уменьшаем до размера пресса)
+                const maxDim = Math.max(size.x, size.y, size.z);
+                if (maxDim > 1.5) {
+                    const scale = 1.5 / maxDim;
+                    model.scale.set(scale, scale, scale);
+                    size.multiplyScalar(scale); // Обновляем размер для физики
+                }
+
+                model.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+
+                // Оборачиваем в Group для удобного сжатия
+                const group = new THREE.Group();
+                group.add(model);
+                scene.add(group);
+
+                // 3. Создаем физическую коробку по размеру модели
+                const shape = new CANNON.Box(new CANNON.Vec3(size.x/2, size.y/2, size.z/2));
+                const body = new CANNON.Body({ mass: 1.5, shape });
+                body.position.set(0, 4, 0);
+                world.addBody(body);
+
+                props.push({ 
+                    mesh: group, 
+                    body, 
+                    type: 'custom', 
+                    radius: Math.max(size.x, size.z) / 2,
+                    originalSize: size.clone()
+                });
+
+            }, undefined, (err) => {
+                console.error(err);
+                alert("Ошибка: Не удалось загрузить life.glb!\n\n1. Проверьте, что файл называется life.glb (не .gbl)\n2. Он лежит в той же папке, что и index.html");
+            });
         }
 
         // --- 9. Разрушение ---
         function breakObject(prop) {
             const pos = prop.body.position;
-            
             scene.remove(prop.mesh);
             world.removeBody(prop.body);
             const idx = props.indexOf(prop);
@@ -368,35 +334,31 @@
 
             shakeCamera(prop.type === 'cooler' ? 0.4 : 0.2);
 
-            // Вызов звука
-            if (prop.type === 'balloon') {
-                playPopSound();
-            } else if (prop.type === 'cooler') {
-                playSmashSound();
-            }
+            if (prop.type === 'balloon') playPopSound();
+            else if (prop.type === 'cooler') playSmashSound();
+            else if (prop.type === 'custom') playCrunchSound(); // Звук для кастомной модели
 
             const numFragments = prop.type === 'cooler' ? 25 : 15;
-            const color = prop.type === 'cooler' ? 0xeeeeee : 0xff2222;
+            const color = prop.type === 'cooler' ? 0xeeeeee : (prop.type === 'custom' ? 0xcccccc : 0xff2222);
             
             for (let i = 0; i < numFragments; i++) {
                 const size = Math.random() * 0.15 + 0.05;
-                const fragGeo = new THREE.BoxGeometry(size, size, size);
-                const fragMat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.5 });
-                const fragMesh = new THREE.Mesh(fragGeo, fragMat);
+                const fragMesh = new THREE.Mesh(
+                    new THREE.BoxGeometry(size, size, size),
+                    new THREE.MeshStandardMaterial({ color: color, roughness: 0.5 })
+                );
                 fragMesh.castShadow = true;
                 scene.add(fragMesh);
 
                 const fragBody = new CANNON.Body({ mass: 0.05, shape: new CANNON.Box(new CANNON.Vec3(size/2, size/2, size/2)) });
                 fragBody.position.set(pos.x + (Math.random()-0.5)*0.5, pos.y + (Math.random()-0.5)*0.5, pos.z + (Math.random()-0.5)*0.5);
-                
                 fragBody.velocity.set((Math.random()-0.5)*15, Math.random()*10 + 5, (Math.random()-0.5)*15);
                 fragBody.angularVelocity.set(Math.random()*20, Math.random()*20, Math.random()*20);
                 world.addBody(fragBody);
 
                 props.push({ mesh: fragMesh, body: fragBody, type: 'fragment', life: 3.0 });
             }
-
-            createSplash(pos, prop.type === 'cooler' ? 0x00aaff : 0xffffff);
+            createSplash(pos, prop.type === 'cooler' ? 0x00aaff : (prop.type === 'custom' ? 0xaaaaaa : 0xffffff));
         }
 
         function createSplash(pos, color) {
@@ -433,10 +395,7 @@
 
         let shakeTime = 0;
         let shakePower = 0;
-        function shakeCamera(power) {
-            shakePower = power;
-            shakeTime = 0.2;
-        }
+        function shakeCamera(power) { shakePower = power; shakeTime = 0.2; }
 
         // --- 10. Цикл ---
         let frames = 0;
@@ -460,7 +419,6 @@
                 wallLeft.position.x = THREE.MathUtils.lerp(startX1, targetX1, progress);
                 wallRight.position.x = THREE.MathUtils.lerp(startX2, targetX2, progress);
                 
-                // Звук смыкания металлических стен (срабатывает один раз при достижении конца)
                 if (progress >= 0.99 && isCrushing && !hasClanked) {
                     hasClanked = true;
                     playMetalClankSound();
@@ -475,22 +433,28 @@
                     
                     if (p.type === 'balloon') {
                         if (Math.abs(p.body.position.x) < 1.0 && p.body.position.y > -1.5) {
-                            const availableSpace = centerGap;
-                            const squashFactor = THREE.MathUtils.clamp(1 - (availableSpace / (p.radius * 2)), 0, 1);
-                            
-                            if (p.mesh.material.userData.shader) {
-                                p.mesh.material.userData.shader.uniforms.uSquash.value = squashFactor;
-                            }
-
-                            if (squashFactor > 0.95) {
-                                breakObject(p);
-                            }
+                            const squashFactor = THREE.MathUtils.clamp(1 - (centerGap / (p.radius * 2)), 0, 1);
+                            if (p.mesh.material.userData.shader) p.mesh.material.userData.shader.uniforms.uSquash.value = squashFactor;
+                            if (squashFactor > 0.95) breakObject(p);
                         }
                     }
 
                     if (p.type === 'cooler') {
-                        if (currentGap < 1.2 && Math.abs(p.body.position.x) < p.radius) {
-                            breakObject(p);
+                        if (currentGap < 1.2 && Math.abs(p.body.position.x) < p.radius) breakObject(p);
+                    }
+
+                    // СЖАТИЕ КАСТОМНОЙ МОДЕЛИ
+                    if (p.type === 'custom') {
+                        if (Math.abs(p.body.position.x) < 1.5 && p.body.position.y > -1.5) {
+                            const squashFactor = THREE.MathUtils.clamp(1 - (centerGap / p.originalSize.x), 0, 1);
+                            
+                            // Визуально сплющиваем модель (сжимаем по X, растягиваем по Y и Z)
+                            p.mesh.scale.x = Math.max(0.1, 1 - squashFactor * 0.8);
+                            p.mesh.scale.y = 1 + squashFactor * 0.3;
+                            p.mesh.scale.z = 1 + squashFactor * 0.3;
+
+                            // Если сжали до предела - ломаем
+                            if (squashFactor > 0.9) breakObject(p);
                         }
                     }
                 }
@@ -514,7 +478,6 @@
             }
 
             controls.update(); 
-
             if (shakeTime > 0) {
                 shakeTime -= dt;
                 camera.position.x += (Math.random() - 0.5) * shakePower;
