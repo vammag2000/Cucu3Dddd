@@ -15,10 +15,11 @@
         #crush-btn:disabled { background:#333; box-shadow:none; color:#777; }
         #fps { position:absolute; top:80px; right:20px; color:#0f0; font-family:monospace; font-size:14px; background:rgba(0,0,0,0.6); padding:4px 8px; border-radius:5px; z-index:20; }
         
-        #loading-container { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); color:#fff; font-size:18px; z-index:100; text-align:center; width:80%; max-width:300px;}
-        #loading-bar { width:100%; height:10px; background:#333; border-radius:5px; margin-top:10px; overflow:hidden; }
+        #loading-container { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); color:#fff; font-size:18px; z-index:100; text-align:center; width:90%; max-width:350px; background: rgba(0,0,0,0.8); padding: 20px; border-radius: 15px;}
+        #loading-text { margin-bottom: 10px; font-weight: bold; }
+        #loading-bar { width:100%; height:10px; background:#333; border-radius:5px; overflow:hidden; }
         #loading-progress { width:0%; height:100%; background:#ff4757; transition: width 0.2s; }
-        #error-msg { position:absolute; top:20%; left:50%; transform:translateX(-50%); background:rgba(255,0,0,0.9); color:white; padding:15px; border-radius:10px; font-size:16px; display:none; z-index:200; text-align:center; width:85%; pointer-events:none; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        #error-msg { position:absolute; top:20%; left:50%; transform:translateX(-50%); background:rgba(255,0,0,0.95); color:white; padding:15px; border-radius:10px; font-size:16px; display:none; z-index:200; text-align:center; width:85%; pointer-events:none; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.5); border: 2px solid #ffaaaa;}
     </style>
     <script type="importmap">
     {
@@ -32,7 +33,7 @@
 </head>
 <body>
     <div id="loading-container">
-        Загрузка ассетов...
+        <div id="loading-text">Загрузка пресса (model.glb)...</div>
         <div id="loading-bar"><div id="loading-progress"></div></div>
     </div>
     <div id="error-msg">Ошибка загрузки</div>
@@ -121,41 +122,59 @@
         const props = []; const clock = new THREE.Clock();
         let kostyaModelTemplate = null; 
 
-        // --- 4. НАДЕЖНАЯ ЗАГРУЗКА (с прогресс-баром и таймаутом) ---
-        const manager = new THREE.LoadingManager();
-        const loader = new GLTFLoader(manager);
+        // --- 4. ПОШАГОВАЯ ЗАГРУЗКА (Чтобы понять, что зависает) ---
+        const loader = new GLTFLoader();
         const dracoLoader = new DRACOLoader(); dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/'); loader.setDRACOLoader(dracoLoader);
 
-        manager.onProgress = (url, itemsLoaded, itemsTotal) => {
-            const percent = (itemsLoaded / itemsTotal) * 100;
-            document.getElementById('loading-progress').style.width = percent + '%';
-        };
-
-        manager.onError = (url) => {
-            document.getElementById('loading-container').style.display = 'none';
-            document.getElementById('error-msg').style.display = 'block';
-            document.getElementById('error-msg').innerHTML = `ОШИБКА: Не удалось загрузить файл <b>${url}</b>.<br>Проверьте его наличие и правильность названия.`;
-        };
-
-        // Оборачиваем загрузку в функцию с таймаутом
         const loadWithTimeout = (url, timeoutMs = 15000) => {
             return new Promise((resolve, reject) => {
-                const timer = setTimeout(() => reject(new Error(`Таймаут загрузки: ${url}`)), timeoutMs);
-                loader.load(url, (res) => { clearTimeout(timer); resolve(res); }, undefined, (err) => { clearTimeout(timer); reject(err); });
+                const timer = setTimeout(() => reject(new Error(`Таймаут загрузки файла: ${url}`)), timeoutMs);
+                loader.load(url, 
+                    (res) => { clearTimeout(timer); resolve(res); }, 
+                    (xhr) => {
+                        if (xhr.total > 0) {
+                            const percent = (xhr.loaded / xhr.total) * 100;
+                            document.getElementById('loading-progress').style.width = percent + '%';
+                        }
+                    },
+                    (err) => { clearTimeout(timer); reject(new Error(`Не найден или поврежден файл: ${url}`)); }
+                );
             });
         };
 
-        Promise.all([
-            loadWithTimeout('./model.glb'),
-            loadWithTimeout('./life.glb'),
-            loadWithTimeout('./kostya.glb')
-        ]).then(([pressGltf, lifeGltf, kostyaGltf]) => {
+        async function startLoading() {
+            try {
+                // 1. Загрузка пресса
+                const pressGltf = await loadWithTimeout('./model.glb');
+                
+                // 2. Загрузка курицы
+                document.getElementById('loading-text').innerText = 'Загрузка курицы (life.glb)...';
+                document.getElementById('loading-progress').style.width = '0%';
+                const lifeGltf = await loadWithTimeout('./life.glb');
+
+                // 3. Загрузка кости
+                document.getElementById('loading-text').innerText = 'Загрузка кости (kostya.glb)...';
+                document.getElementById('loading-progress').style.width = '0%';
+                const kostyaGltf = await loadWithTimeout('./kostya.glb');
+
+                // Инициализация после успешной загрузки
+                initScene(pressGltf, lifeGltf, kostyaGltf);
+
+            } catch (err) {
+                document.getElementById('loading-container').style.display = 'none';
+                document.getElementById('error-msg').style.display = 'block';
+                document.getElementById('error-msg').innerHTML = `ОШИБКА ЗАГРУЗКИ:<br><br>${err.message}<br><br>Проверьте, что файл лежит в папке с index.html и называется строго (без больших букв).`;
+            }
+        }
+
+        function initScene(pressGltf, lifeGltf, kostyaGltf) {
             const src = pressGltf.scene;
             const box = new THREE.Box3().setFromObject(src); const center = new THREE.Vector3(); box.getCenter(center); src.position.sub(center);
             src.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
             wallLeft = new THREE.Group(); wallLeft.add(src); wallLeft.rotation.y = -Math.PI / 2; scene.add(wallLeft);
             const clone = src.clone(true); clone.traverse(o => { if (o.isMesh && o.material) o.material = o.material.clone(); });
             wallRight = new THREE.Group(); wallRight.add(clone); wallRight.rotation.y = Math.PI / 2; scene.add(wallRight);
+            
             const rotatedBox = new THREE.Box3().setFromObject(wallLeft); const size = new THREE.Vector3(); rotatedBox.getSize(size); const halfWidth = size.x / 2;
             targetX1 = -halfWidth - 0.05; targetX2 = halfWidth + 0.05; startX1 = -halfWidth - 3.5; startX2 = halfWidth + 3.5;
             wallLeft.position.set(startX1, 0, 0); wallRight.position.set(startX2, 0, 0);
@@ -166,11 +185,9 @@
 
             document.getElementById('loading-container').style.display = 'none';
             document.getElementById('crush-btn').disabled = false;
-        }).catch(err => {
-            document.getElementById('loading-container').style.display = 'none';
-            document.getElementById('error-msg').style.display = 'block';
-            document.getElementById('error-msg').innerHTML = `ОШИБКА загрузки ассетов.<br>Убедитесь, что <b>model.glb</b>, <b>life.glb</b> и <b>kostya.glb</b> лежат в папке с index.html (и названия совпадают по регистру).<br><br><small>${err.message}</small>`;
-        });
+        }
+
+        startLoading(); // Запускаем процесс
 
         // --- 5. КНОПКИ ---
         document.getElementById('crush-btn').addEventListener('click', () => {
@@ -197,7 +214,6 @@
             props.push({ mesh: group, body, type: 'cooler', radius: 0.5, processed: false });
         }
         function spawnLife() {
-            if (!kostyaModelTemplate) return; // Ждем загрузки
             loadWithTimeout('./life.glb').then(gltf => {
                 const model = gltf.scene;
                 const box = new THREE.Box3().setFromObject(model); const size = new THREE.Vector3(); box.getSize(size);
@@ -212,7 +228,7 @@
                 body.fixedRotation = true; body.angularFactor.set(0, 0, 0); body.updateMassProperties();
                 world.addBody(body);
                 props.push({ mesh: group, body, type: 'life', originalSize: size.clone(), stage: 0 });
-            }).catch(err => { document.getElementById('error-msg').style.display = 'block'; document.getElementById('error-msg').innerHTML = 'ОШИБКА: life.glb не найден!'; });
+            }).catch(err => { alert("ОШИБКА: life.glb не найден при спавне!"); });
         }
 
         // --- 7. ГИПЕРРЕАЛИСТИЧНАЯ КРОВЬ ---
@@ -322,7 +338,6 @@
                 const currentGap = wallRight.position.x - wallLeft.position.x; 
                 const centerGap = currentGap - (targetX2 - targetX1); 
 
-                // Шарик
                 for (let i = props.length - 1; i >= 0; i--) {
                     const p = props[i];
                     if (p.type === 'balloon' && !p.processed) {
@@ -334,7 +349,6 @@
                     }
                 }
 
-                // Кулер
                 for (let i = props.length - 1; i >= 0; i--) {
                     const p = props[i];
                     if (p.type === 'cooler' && !p.processed) {
@@ -346,7 +360,6 @@
                     }
                 }
 
-                // Курица
                 if (progress >= 0.99 && isCrushing) {
                     const lifeProp = props.find(p => p.type === 'life');
                     if (lifeProp && !lifeProp.processed) {
@@ -369,7 +382,6 @@
                     }
                 }
 
-                // Сплющивание
                 props.forEach(p => {
                     if (p.type === 'life' && p.stage === 0) {
                         if (Math.abs(p.body.position.x) < 1.5) {
