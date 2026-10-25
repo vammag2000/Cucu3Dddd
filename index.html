@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Гидравлический пресс: Идеал</title>
+    <title>Гидравлический пресс: Идеал + Звук</title>
     <style>
         body { margin:0; overflow:hidden; background:#0a0a0a; font-family:sans-serif; touch-action:none; user-select:none; }
         #canvas-container { width:100vw; height:100vh; display:block; }
@@ -64,7 +64,142 @@
         import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
         import * as CANNON from 'cannon-es';
 
-        // --- 1. Рендерер и Сцена ---
+        // --- 1. АУДИО СИСТЕМА (Web Audio API) ---
+        let audioCtx = null;
+
+        // Инициализация звука (вызывается при первом клике)
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
+
+        // Звук лопающегося шарика
+        function playPopSound() {
+            if (!audioCtx) return;
+            const t = audioCtx.currentTime;
+
+            // 1. Резкий хлопок (шум)
+            const bufferSize = audioCtx.sampleRate * 0.1;
+            const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+            
+            const noise = audioCtx.createBufferSource();
+            noise.buffer = buffer;
+            const noiseFilter = audioCtx.createBiquadFilter();
+            noiseFilter.type = 'highpass';
+            noiseFilter.frequency.value = 800;
+            const noiseGain = audioCtx.createGain();
+            noiseGain.gain.setValueAtTime(1, t);
+            noiseGain.gain.exponentialRampToValueAtTime(0.01, t + 0.1);
+            
+            noise.connect(noiseFilter).connect(noiseGain).connect(audioCtx.destination);
+            noise.start(t);
+
+            // 2. Низкий бас (упругость резины)
+            const osc = audioCtx.createOscillator();
+            const oscGain = audioCtx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(150, t);
+            osc.frequency.exponentialRampToValueAtTime(40, t + 0.1);
+            oscGain.gain.setValueAtTime(1, t);
+            oscGain.gain.exponentialRampToValueAtTime(0.01, t + 0.2);
+            
+            osc.connect(oscGain).connect(audioCtx.destination);
+            osc.start(t);
+            osc.stop(t + 0.2);
+        }
+
+        // Звук разбивающегося кулера (пластик + вода)
+        function playSmashSound() {
+            if (!audioCtx) return;
+            const t = audioCtx.currentTime;
+
+            // 1. Хруст пластика (шум высоких частот)
+            const bufSize1 = audioCtx.sampleRate * 0.3;
+            const buffer1 = audioCtx.createBuffer(1, bufSize1, audioCtx.sampleRate);
+            const data1 = buffer1.getChannelData(0);
+            for (let i = 0; i < bufSize1; i++) data1[i] = Math.random() * 2 - 1;
+            
+            const noise1 = audioCtx.createBufferSource();
+            noise1.buffer = buffer1;
+            const filter1 = audioCtx.createBiquadFilter();
+            filter1.type = 'bandpass';
+            filter1.frequency.value = 2000; // Хрусткий пластик
+            const gain1 = audioCtx.createGain();
+            gain1.gain.setValueAtTime(0.8, t);
+            gain1.gain.exponentialRampToValueAtTime(0.01, t + 0.2);
+            
+            noise1.connect(filter1).connect(gain1).connect(audioCtx.destination);
+            noise1.start(t);
+
+            // 2. Разлив воды (шум низких частот)
+            const bufSize2 = audioCtx.sampleRate * 0.8;
+            const buffer2 = audioCtx.createBuffer(1, bufSize2, audioCtx.sampleRate);
+            const data2 = buffer2.getChannelData(0);
+            for (let i = 0; i < bufSize2; i++) data2[i] = Math.random() * 2 - 1;
+
+            const noise2 = audioCtx.createBufferSource();
+            noise2.buffer = buffer2;
+            const filter2 = audioCtx.createBiquadFilter();
+            filter2.type = 'lowpass';
+            filter2.frequency.value = 400; // Глухой звук воды
+            const gain2 = audioCtx.createGain();
+            gain2.gain.setValueAtTime(0.6, t);
+            gain2.gain.exponentialRampToValueAtTime(0.01, t + 0.7);
+            
+            noise2.connect(filter2).connect(gain2).connect(audioCtx.destination);
+            noise2.start(t);
+
+            // 3. Тяжелый удар
+            const osc = audioCtx.createOscillator();
+            const oscGain = audioCtx.createGain();
+            osc.type = 'square';
+            osc.frequency.setValueAtTime(80, t);
+            osc.frequency.exponentialRampToValueAtTime(20, t + 0.2);
+            oscGain.gain.setValueAtTime(1, t);
+            oscGain.gain.exponentialRampToValueAtTime(0.01, t + 0.3);
+            
+            osc.connect(oscGain).connect(audioCtx.destination);
+            osc.start(t);
+            osc.stop(t + 0.3);
+        }
+
+        // Звук смыкания металлических стен
+        function playMetalClankSound() {
+            if (!audioCtx) return;
+            const t = audioCtx.currentTime;
+
+            // Металлический звон (несколько высоких частот)
+            const freqs = [800, 1200, 1500];
+            freqs.forEach((freq, index) => {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(freq, t);
+                gain.gain.setValueAtTime(0.15 - index * 0.03, t);
+                gain.gain.exponentialRampToValueAtTime(0.01, t + 0.4);
+                osc.connect(gain).connect(audioCtx.destination);
+                osc.start(t);
+                osc.stop(t + 0.4);
+            });
+
+            // Низкий удар
+            const bassOsc = audioCtx.createOscillator();
+            const bassGain = audioCtx.createGain();
+            bassOsc.type = 'sine';
+            bassOsc.frequency.setValueAtTime(100, t);
+            bassOsc.frequency.exponentialRampToValueAtTime(30, t + 0.3);
+            bassGain.gain.setValueAtTime(1, t);
+            bassGain.gain.exponentialRampToValueAtTime(0.01, t + 0.5);
+            bassOsc.connect(bassGain).connect(audioCtx.destination);
+            bassOsc.start(t);
+            bassOsc.stop(t + 0.5);
+        }
+
+
+        // --- 2. Рендерер и Сцена ---
         const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); 
@@ -85,10 +220,9 @@
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
 
-        // --- 2. Свет ---
+        // --- 3. Свет ---
         scene.add(new THREE.HemisphereLight(0xffffff, 0x333333, 1.0));
-        
-        const dirLight = new THREE.DirectionalLight(0xffffff, 1.5); // Умеренная яркость
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.5); 
         dirLight.position.set(5, 10, 7);
         dirLight.castShadow = true;
         dirLight.shadow.mapSize.width = 1024;
@@ -100,7 +234,7 @@
         dirLight.shadow.camera.bottom = -10;
         scene.add(dirLight);
 
-        // --- 3. Физический мир ---
+        // --- 4. Физический мир ---
         const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -20, 0) });
         world.allowSleep = true; 
 
@@ -118,7 +252,7 @@
         groundMesh.receiveShadow = true;
         scene.add(groundMesh);
 
-        // --- 4. Переменные ---
+        // --- 5. Переменные ---
         let wallLeft, wallRight;
         let isCrushing = false;
         let progress = 0;
@@ -126,17 +260,16 @@
         let startX1, startX2, targetX1, targetX2;
         const props = []; 
         const clock = new THREE.Clock();
+        let hasClanked = false; // Флаг для звука удара стен
 
-        // --- 5. Загрузка пресса ---
+        // --- 6. Загрузка пресса ---
         new GLTFLoader().load('./model.glb', (gltf) => {
             const src = gltf.scene;
             const box = new THREE.Box3().setFromObject(src);
             const center = new THREE.Vector3(); box.getCenter(center);
             src.position.sub(center);
 
-            src.traverse(o => { 
-                if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } 
-            });
+            src.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
 
             wallLeft = new THREE.Group(); wallLeft.add(src); wallLeft.rotation.y = -Math.PI / 2; scene.add(wallLeft);
 
@@ -162,16 +295,18 @@
             document.getElementById('crush-btn').disabled = false;
         });
 
-        // --- 6. Кнопки ---
+        // --- 7. Кнопки ---
         document.getElementById('crush-btn').addEventListener('click', () => {
+            initAudio(); // Включаем звук при первом клике
             isCrushing = !isCrushing;
+            hasClanked = false; // Сбрасываем флаг удара
             document.getElementById('crush-btn').innerText = isCrushing ? 'РАЗДВИНУТЬ' : 'ДАВИТЬ';
         });
 
-        document.getElementById('btn-balloon').onclick = () => spawnBalloon();
-        document.getElementById('btn-cooler').onclick = () => spawnCooler();
+        document.getElementById('btn-balloon').onclick = () => { initAudio(); spawnBalloon(); };
+        document.getElementById('btn-cooler').onclick = () => { initAudio(); spawnCooler(); };
 
-        // --- 7. Спавн ---
+        // --- 8. Спавн ---
         function spawnBalloon() {
             const geo = new THREE.SphereGeometry(0.6, 32, 32);
             const mat = new THREE.MeshStandardMaterial({ color: 0xff2222, roughness: 0.1, metalness: 0.2 });
@@ -214,7 +349,6 @@
             group.add(plasticMesh);
             scene.add(group);
 
-            // В cannon-es цилиндр уже стоит вертикально. Никаких поворотов.
             const shape = new CANNON.Cylinder(0.5, 0.5, 1.5, 16);
             const body = new CANNON.Body({ mass: 2.0, shape });
             body.position.set(0, 4, 0);
@@ -223,7 +357,7 @@
             props.push({ mesh: group, body, type: 'cooler', radius: 0.5 });
         }
 
-        // --- 8. Разрушение ---
+        // --- 9. Разрушение ---
         function breakObject(prop) {
             const pos = prop.body.position;
             
@@ -233,6 +367,13 @@
             if (idx > -1) props.splice(idx, 1);
 
             shakeCamera(prop.type === 'cooler' ? 0.4 : 0.2);
+
+            // Вызов звука
+            if (prop.type === 'balloon') {
+                playPopSound();
+            } else if (prop.type === 'cooler') {
+                playSmashSound();
+            }
 
             const numFragments = prop.type === 'cooler' ? 25 : 15;
             const color = prop.type === 'cooler' ? 0xeeeeee : 0xff2222;
@@ -297,7 +438,7 @@
             shakeTime = 0.2;
         }
 
-        // --- 9. Цикл ---
+        // --- 10. Цикл ---
         let frames = 0;
         let lastTime = performance.now();
 
@@ -319,6 +460,13 @@
                 wallLeft.position.x = THREE.MathUtils.lerp(startX1, targetX1, progress);
                 wallRight.position.x = THREE.MathUtils.lerp(startX2, targetX2, progress);
                 
+                // Звук смыкания металлических стен (срабатывает один раз при достижении конца)
+                if (progress >= 0.99 && isCrushing && !hasClanked) {
+                    hasClanked = true;
+                    playMetalClankSound();
+                    shakeCamera(0.3);
+                }
+
                 const currentGap = wallRight.position.x - wallLeft.position.x;
                 const centerGap = currentGap - (targetX2 - targetX1); 
 
@@ -365,9 +513,8 @@
                 }
             }
 
-            controls.update(); // Сначала обновляем контроллы
+            controls.update(); 
 
-            // Тряска ПОСЛЕ обновления контроллов, чтобы не было конфликта
             if (shakeTime > 0) {
                 shakeTime -= dt;
                 camera.position.x += (Math.random() - 0.5) * shakePower;
